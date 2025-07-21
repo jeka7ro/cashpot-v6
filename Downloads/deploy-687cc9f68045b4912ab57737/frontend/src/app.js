@@ -2805,11 +2805,6 @@ const Dashboard = () => {
             <h2>CASHPOT</h2>
             <span className="header-subtitle">Gaming Management System</span>
           </div>
-          <div className="header-breadcrumb">
-            <span className="breadcrumb-text">
-              {navigationItems.find(item => item.id === activeView)?.label || 'Dashboard'}
-            </span>
-          </div>
         </div>
         <div className="header-right">
           <button 
