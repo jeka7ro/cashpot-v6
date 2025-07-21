@@ -19,9 +19,11 @@ pip-delete-this-directory.txt
 .env.production.local
 
 # Build outputs
-build/
 dist/
 *.egg-info/
+
+# Frontend build (allow this for deployment)
+!frontend/build/
 
 # IDE
 .vscode/

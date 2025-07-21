@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Block sensitive areas
+Disallow: /api/
+Disallow: /admin/
+Disallow: /_redirects
+
+Sitemap: https://emergent-v1.vercel.app/sitemap.xml
