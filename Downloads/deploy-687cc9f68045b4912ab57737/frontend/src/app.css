@@ -24,12 +24,12 @@
   --text-secondary: #475569;
   --text-muted: #64748b;
   --border-color: #b3d9ff;
-  --accent-color: #3b82f6;
-  --accent-hover: #2563eb;
+  --accent-color: #60a5fa;
+  --accent-hover: #3b82f6;
   --sidebar-bg: rgba(230, 243, 255, 0.95);
-  --header-bg: rgba(255, 255, 255, 0.98);
-  --glass-bg: rgba(230, 243, 255, 0.8);
-  --glass-border: rgba(209, 231, 255, 0.2);
+  --header-bg: rgba(219, 234, 254, 0.98);
+  --glass-bg: rgba(219, 234, 254, 0.8);
+  --glass-border: rgba(191, 219, 254, 0.2);
 }
 
 /* Modern Dashboard Theme with Sidebar and Data Tables */

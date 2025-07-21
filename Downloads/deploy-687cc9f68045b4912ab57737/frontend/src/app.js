@@ -2812,13 +2812,6 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="header-right">
-          <div className="header-welcome">
-            <span className="welcome-text">
-              Welcome, {user?.first_name && user?.last_name 
-                ? `${user.first_name} ${user.last_name}` 
-                : user?.username}
-            </span>
-          </div>
           <button 
             className="theme-toggle"
             onClick={() => setDarkMode(!darkMode)}
@@ -2889,9 +2882,6 @@ const Dashboard = () => {
                 <span className="user-role">{user?.role}</span>
               </div>
             </div>
-            <button onClick={logout} className="logout-btn">
-              🚪
-            </button>
           </div>
         </div>
 
