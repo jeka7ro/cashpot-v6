@@ -2,14 +2,22 @@
   "version": 2,
   "builds": [
     {
-      "src": "package.json",
+      "src": "frontend/package.json",
       "use": "@vercel/static-build",
       "config": {
-        "distDir": "build"
+        "distDir": "frontend/build"
       }
+    },
+    {
+      "src": "backend/server.py",
+      "use": "@vercel/python"
     }
   ],
   "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/backend/server.py"
+    },
     {
       "src": "/favicon.ico",
       "dest": "/favicon.ico"
@@ -30,6 +38,6 @@
       "dest": "/index.html"
     }
   ],
-  "buildCommand": "yarn install && yarn build",
-  "outputDirectory": "build"
-}
+  "buildCommand": "cd frontend && yarn install && yarn build",
+  "outputDirectory": "frontend/build"
+} 
