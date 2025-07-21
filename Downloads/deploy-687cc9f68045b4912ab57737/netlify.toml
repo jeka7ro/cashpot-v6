@@ -5,11 +5,19 @@
 [build.environment]
   NODE_VERSION = "18"
 
+# Redirect all routes to index.html for SPA
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# API routes (if you have serverless functions)
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
 
+# Static files
 [[redirects]]
   from = "/favicon.ico"
   to = "/favicon.ico"
@@ -25,14 +33,7 @@
   to = "/static/:splat"
   status = 200
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
-[functions]
-  directory = "backend"
-
+# Security headers
 [[headers]]
   for = "/*"
   [headers.values]
@@ -41,6 +42,7 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
+# Cache static files
 [[headers]]
   for = "/static/*"
   [headers.values]
