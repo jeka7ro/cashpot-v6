@@ -54,6 +54,8 @@ class UserPermissions(BaseModel):
         "invoices": False,
         "onjn_reports": False,
         "legal_documents": False,
+        "metrology": False,
+        "jackpots": False,
         "users": False
     }
     # Action permissions per module
@@ -67,6 +69,8 @@ class UserPermissions(BaseModel):
         "invoices": {"create": False, "read": False, "update": False, "delete": False},
         "onjn_reports": {"create": False, "read": False, "update": False, "delete": False},
         "legal_documents": {"create": False, "read": False, "update": False, "delete": False},
+        "metrology": {"create": False, "read": False, "update": False, "delete": False},
+        "jackpots": {"create": False, "read": False, "update": False, "delete": False},
         "users": {"create": False, "read": False, "update": False, "delete": False}
     }
     # Accessible companies and locations
@@ -77,6 +81,7 @@ class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     username: str
     email: str
+    phone: Optional[str] = None
     password_hash: str
     first_name: str = ""  # Numele
     last_name: str = ""   # Prenumele
@@ -89,6 +94,7 @@ class User(BaseModel):
 class UserCreate(BaseModel):
     username: str
     email: str
+    phone: Optional[str] = None
     password: str
     first_name: str = ""
     last_name: str = ""
@@ -99,6 +105,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
+    phone: Optional[str] = None
     password: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -147,6 +154,13 @@ class Location(BaseModel):
     longitude: Optional[float] = None
     company_id: str
     manager_id: Optional[str] = None
+    manager_phone: Optional[str] = None
+    manager_email: Optional[str] = None
+    contact_person_type: Optional[str] = "manual"
+    contact_person_id: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
     status: str = "active"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     created_by: str
@@ -160,6 +174,13 @@ class LocationCreate(BaseModel):
     postal_code: str
     company_id: str
     manager_id: Optional[str] = None
+    manager_phone: Optional[str] = None
+    manager_email: Optional[str] = None
+    contact_person_type: Optional[str] = "manual"
+    contact_person_id: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
 
 class Provider(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -229,6 +250,13 @@ class SlotMachine(BaseModel):
     status: str = "active"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     created_by: str
+    location_id: Optional[str] = None
+    production_year: Optional[int] = None
+    # Property fields
+    ownership_type: Optional[str] = None  # "property" or "rent"
+    owner_company_id: Optional[str] = None  # Company that owns the slot
+    lease_provider_id: Optional[str] = None  # Provider for rented slots
+    lease_contract_number: Optional[str] = None  # Contract number for rented slots
 
 class SlotMachineCreate(BaseModel):
     cabinet_id: str
@@ -242,6 +270,14 @@ class SlotMachineCreate(BaseModel):
     gaming_places: int
     commission_date: Optional[datetime] = None
     invoice_number: Optional[str] = None
+    status: Optional[str] = "active"
+    location_id: Optional[str] = None
+    production_year: Optional[int] = None
+    # Property fields
+    ownership_type: Optional[str] = None  # "property" or "rent"
+    owner_company_id: Optional[str] = None  # Company that owns the slot
+    lease_provider_id: Optional[str] = None  # Provider for rented slots
+    lease_contract_number: Optional[str] = None  # Contract number for rented slots
 
 class Attachment(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -250,7 +286,7 @@ class Attachment(BaseModel):
     file_size: int
     mime_type: str
     file_data: str  # base64 encoded file data
-    entity_type: str  # users, providers, cabinets, game_mixes, slots, invoices, onjn, legal
+    entity_type: str  # users, providers, cabinets, game_mixes, slots, invoices, onjn, legal, metrology, jackpots
     entity_id: str
     uploaded_by: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -269,6 +305,8 @@ class Invoice(BaseModel):
     invoice_number: str
     company_id: str
     location_id: str
+    buyer_id: Optional[str] = None  # ID of the buyer company
+    seller_id: Optional[str] = None  # ID of the seller provider
     serial_numbers: str  # Space-separated serial numbers
     issue_date: datetime
     due_date: datetime
@@ -283,11 +321,14 @@ class InvoiceCreate(BaseModel):
     invoice_number: str
     company_id: str
     location_id: str
+    buyer_id: Optional[str] = None
+    seller_id: Optional[str] = None
     serial_numbers: str
     issue_date: datetime
     due_date: datetime
     amount: float
     currency: str = "EUR"
+    status: str = "pending"
     description: str
 
 class ONJNReport(BaseModel):
@@ -335,6 +376,59 @@ class LegalDocumentCreate(BaseModel):
     issuing_authority: str
     description: str
 
+# Metrology Module
+class Metrology(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    serial_number: str  # Links to slot machine
+    certificate_number: str
+    certificate_type: str  # calibration, verification, certification
+    issue_date: datetime
+    issuing_authority: str
+    cvt_expiry_date: Optional[datetime] = None  # CVT expiry date field
+    cvt_type: Optional[str] = None  # CVT type: periodic, reparation
+    status: str = "active"  # active, expired, pending
+    description: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_by: str
+
+class MetrologyCreate(BaseModel):
+    serial_number: str
+    certificate_number: str
+    certificate_type: str
+    issue_date: datetime
+    issuing_authority: str
+    cvt_expiry_date: Optional[datetime] = None  # CVT expiry date field
+    cvt_type: Optional[str] = None  # CVT type: periodic, reparation
+    status: Optional[str] = "active"
+    description: str
+
+# Jackpot Module
+class Jackpot(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    serial_number: str  # Links to slot machine
+    jackpot_type: str  # progressive, fixed, mystery
+    jackpot_name: str
+    current_amount: float
+    max_amount: float
+    reset_amount: float
+    increment_rate: float  # percentage
+    last_reset_date: datetime
+    next_reset_date: Optional[datetime] = None
+    status: str = "active"  # active, inactive, won
+    description: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_by: str
+
+class JackpotCreate(BaseModel):
+    serial_number: str
+    jackpot_type: str
+    jackpot_name: str
+    current_amount: float
+    max_amount: float
+    reset_amount: float
+    increment_rate: float
+    description: str
+
 class DashboardStats(BaseModel):
     total_companies: int
     total_locations: int
@@ -347,6 +441,8 @@ class DashboardStats(BaseModel):
     total_invoices: int
     total_onjn_reports: int
     total_legal_documents: int
+    total_metrology: int
+    total_jackpots: int
     total_users: int
     recent_activities: List[dict]
 
@@ -461,7 +557,18 @@ async def filter_by_user_access(user: User, query: dict, entity_type: str) -> di
     return query
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    try:
+        # Ensure inputs are strings
+        if not isinstance(password, str):
+            password = str(password)
+        if not isinstance(hashed, str):
+            hashed = str(hashed)
+        
+        # Use bcrypt directly
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except Exception as e:
+        print(f"❌ Error in verify_password: {e}")
+        return False
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -510,7 +617,10 @@ async def register(user_data: UserCreate):
     user_dict = user_data.dict()
     user_dict["password_hash"] = hash_password(user_data.password)
     del user_dict["password"]
-    
+    # Ensure permissions is always a valid dict
+    if not user_dict.get("permissions"):
+        from pydantic import parse_obj_as
+        user_dict["permissions"] = UserPermissions().dict()
     user_obj = User(**user_dict)
     await db.users.insert_one(user_obj.dict())
     
@@ -518,13 +628,31 @@ async def register(user_data: UserCreate):
 
 @api_router.post("/auth/login", response_model=dict)
 async def login(user_data: UserLogin):
+    print(f"🔍 Login attempt for username: {user_data.username}")
+    
     user = await db.users.find_one({"username": user_data.username})
-    if not user or not verify_password(user_data.password, user["password_hash"]):
+    print(f"👤 User found: {user is not None}")
+    
+    if not user:
+        print("❌ User not found")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    print(f"🔐 Hash from database: {user['password_hash']}")
+    print(f"🔐 User ID: {user.get('id', 'N/A')}")
+    print(f"🔐 Created at: {user.get('created_at', 'N/A')}")
+    print(f"🔐 Password verification for user: {user['username']}")
+    password_valid = verify_password(user_data.password, user["password_hash"])
+    print(f"✅ Password valid: {password_valid}")
+    
+    if not password_valid:
+        print("❌ Password invalid")
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
     if not user.get("is_active", True):
+        print("❌ Account inactive")
         raise HTTPException(status_code=401, detail="Account is inactive")
     
+    print("🎉 Login successful, creating token")
     access_token = create_access_token(data={"sub": user["id"]})
     return {
         "access_token": access_token, 
@@ -645,6 +773,13 @@ async def create_location(location_data: LocationCreate, current_user: User = De
     location_dict = location_data.dict()
     location_dict["created_by"] = current_user.id
     
+    # If manager_id is provided, get manager details and populate phone/email
+    if location_data.manager_id:
+        manager = await db.users.find_one({"id": location_data.manager_id})
+        if manager:
+            location_dict["manager_phone"] = manager.get("phone", "")
+            location_dict["manager_email"] = manager.get("email", "")
+    
     # Geocode the address
     lat, lng = await geocode_address(location_data.address, location_data.city, location_data.country)
     location_dict["latitude"] = lat
@@ -684,6 +819,17 @@ async def update_location(location_id: str, location_data: LocationCreate, curre
         raise HTTPException(status_code=404, detail="Location not found")
     
     update_data = location_data.dict()
+    
+    # If manager_id is provided, get manager details and populate phone/email
+    if location_data.manager_id:
+        manager = await db.users.find_one({"id": location_data.manager_id})
+        if manager:
+            update_data["manager_phone"] = manager.get("phone", "")
+            update_data["manager_email"] = manager.get("email", "")
+    else:
+        # Clear manager details if no manager is selected
+        update_data["manager_phone"] = None
+        update_data["manager_email"] = None
     
     # Geocode the address if changed
     if location_data.address != location.get("address") or location_data.city != location.get("city"):
@@ -925,6 +1071,7 @@ async def create_slot_machine(slot_data: SlotMachineCreate, current_user: User =
     
     slot_dict = slot_data.dict()
     slot_dict["created_by"] = current_user.id
+    
     slot_obj = SlotMachine(**slot_dict)
     
     await db.slot_machines.insert_one(slot_obj.dict())
@@ -1022,10 +1169,13 @@ async def upload_attachment(attachment_data: AttachmentCreate, current_user: Use
     # Verify entity exists based on entity_type
     entity_collections = {
         'users': db.users,
+        'companies': db.companies,
+        'locations': db.locations,
         'providers': db.providers,
         'cabinets': db.cabinets,
         'game_mixes': db.game_mixes,
         'slot_machines': db.slot_machines,
+        'slots': db.slot_machines,  # Alias for slots
         'invoices': db.invoices,
         'onjn_reports': db.onjn_reports,
         'legal_documents': db.legal_documents
@@ -1053,10 +1203,13 @@ async def get_entity_attachments(entity_type: str, entity_id: str, current_user:
     # Verify user has access to the entity
     entity_collections = {
         'users': db.users,
+        'companies': db.companies,
+        'locations': db.locations,
         'providers': db.providers,
         'cabinets': db.cabinets,
         'game_mixes': db.game_mixes,
         'slot_machines': db.slot_machines,
+        'slots': db.slot_machines,  # Alias for slots
         'invoices': db.invoices,
         'onjn_reports': db.onjn_reports,
         'legal_documents': db.legal_documents
@@ -1307,6 +1460,105 @@ async def delete_legal_document(document_id: str, current_user: User = Depends(g
     await db.legal_documents.delete_one({"id": document_id})
     return {"message": "Legal document deleted successfully"}
 
+# Metrology endpoints
+@api_router.post("/metrology", response_model=Metrology)
+async def create_metrology(metrology_data: MetrologyCreate, current_user: User = Depends(get_current_user)):
+    metrology = Metrology(
+        **metrology_data.dict(),
+        created_by=current_user.id
+    )
+    
+    await db.metrology.insert_one(metrology.dict())
+    return metrology
+
+@api_router.get("/metrology", response_model=List[Metrology])
+async def get_metrology(current_user: User = Depends(get_current_user)):
+    cursor = db.metrology.find({})
+    metrology_list = await cursor.to_list(length=None)
+    return [Metrology(**convert_objectid_to_str(item)) for item in metrology_list]
+
+@api_router.get("/metrology/{metrology_id}", response_model=Metrology)
+async def get_metrology_record(metrology_id: str, current_user: User = Depends(get_current_user)):
+    metrology = await db.metrology.find_one({"id": metrology_id})
+    if not metrology:
+        raise HTTPException(status_code=404, detail="Metrology record not found")
+    
+    return Metrology(**convert_objectid_to_str(metrology))
+
+@api_router.put("/metrology/{metrology_id}", response_model=Metrology)
+async def update_metrology(metrology_id: str, metrology_data: MetrologyCreate, current_user: User = Depends(get_current_user)):
+    # Check if metrology record exists
+    existing_metrology = await db.metrology.find_one({"id": metrology_id})
+    if not existing_metrology:
+        raise HTTPException(status_code=404, detail="Metrology record not found")
+    
+    update_data = metrology_data.dict()
+    
+    await db.metrology.update_one({"id": metrology_id}, {"$set": update_data})
+    
+    updated_metrology = await db.metrology.find_one({"id": metrology_id})
+    return Metrology(**convert_objectid_to_str(updated_metrology))
+
+@api_router.delete("/metrology/{metrology_id}")
+async def delete_metrology(metrology_id: str, current_user: User = Depends(get_current_user)):
+    # Check if metrology record exists
+    metrology = await db.metrology.find_one({"id": metrology_id})
+    if not metrology:
+        raise HTTPException(status_code=404, detail="Metrology record not found")
+    
+    # Delete metrology record
+    await db.metrology.delete_one({"id": metrology_id})
+    return {"message": "Metrology record deleted successfully"}
+
+# Jackpot endpoints
+@api_router.post("/jackpots", response_model=Jackpot)
+async def create_jackpot(jackpot_data: JackpotCreate, current_user: User = Depends(get_current_user)):
+    jackpot = Jackpot(
+        **jackpot_data.dict(),
+        last_reset_date=datetime.utcnow(),
+        created_by=current_user.id
+    )
+    
+    await db.jackpots.insert_one(jackpot.dict())
+    return jackpot
+
+@api_router.get("/jackpots", response_model=List[Jackpot])
+async def get_jackpots(current_user: User = Depends(get_current_user)):
+    cursor = db.jackpots.find({})
+    jackpot_list = await cursor.to_list(length=None)
+    return [Jackpot(**convert_objectid_to_str(item)) for item in jackpot_list]
+
+@api_router.get("/jackpots/{jackpot_id}", response_model=Jackpot)
+async def get_jackpot(jackpot_id: str, current_user: User = Depends(get_current_user)):
+    jackpot = await db.jackpots.find_one({"id": jackpot_id})
+    if not jackpot:
+        raise HTTPException(status_code=404, detail="Jackpot record not found")
+    
+    return Jackpot(**convert_objectid_to_str(jackpot))
+
+@api_router.put("/jackpots/{jackpot_id}", response_model=Jackpot)
+async def update_jackpot(jackpot_id: str, jackpot_data: JackpotCreate, current_user: User = Depends(get_current_user)):
+    # Check if jackpot record exists
+    existing_jackpot = await db.jackpots.find_one({"id": jackpot_id})
+    if not existing_jackpot:
+        raise HTTPException(status_code=404, detail="Jackpot record not found")
+    
+    await db.jackpots.update_one({"id": jackpot_id}, {"$set": jackpot_data.dict()})
+    
+    updated_jackpot = await db.jackpots.find_one({"id": jackpot_id})
+    return Jackpot(**convert_objectid_to_str(updated_jackpot))
+
+@api_router.delete("/jackpots/{jackpot_id}")
+async def delete_jackpot(jackpot_id: str, current_user: User = Depends(get_current_user)):
+    # Check if jackpot record exists
+    jackpot = await db.jackpots.find_one({"id": jackpot_id})
+    if not jackpot:
+        raise HTTPException(status_code=404, detail="Jackpot record not found")
+    
+    # Delete jackpot record
+    await db.jackpots.delete_one({"id": jackpot_id})
+    return {"message": "Jackpot record deleted successfully"}
+
 @api_router.get("/users", response_model=List[dict])
 async def get_users(current_user: User = Depends(get_current_user)):
     if current_user.role != UserRole.ADMIN:
@@ -1459,6 +1711,10 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     total_onjn_reports = await db.onjn_reports.count_documents(onjn_query)
     total_legal_documents = await db.legal_documents.count_documents(legal_query)
     
+    # Get metrology and jackpot counts
+    total_metrology = await db.metrology.count_documents({})
+    total_jackpots = await db.jackpots.count_documents({})
+    
     # Get user count (only for admin)
     total_users = await db.users.count_documents({}) if current_user.role == UserRole.ADMIN else 0
     
@@ -1531,6 +1787,8 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         total_invoices=total_invoices,
         total_onjn_reports=total_onjn_reports,
         total_legal_documents=total_legal_documents,
+        total_metrology=total_metrology,
+        total_jackpots=total_jackpots,
         total_users=total_users,
         recent_activities=recent_activities
     )
@@ -1555,52 +1813,17 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def startup_db_client():
-    # Create admin user if it doesn't exist
+    # Check if admin user exists
     admin_user = await db.users.find_one({"username": "admin"})
-    if not admin_user:
-        admin_permissions = UserPermissions(
-            modules={
-                "dashboard": True,
-                "companies": True,
-                "locations": True,
-                "providers": True,
-                "cabinets": True,
-                "game_mixes": True,
-                "slot_machines": True,
-                "invoices": True,
-                "onjn_reports": True,
-                "legal_documents": True,
-                "users": True
-            },
-            actions={
-                "companies": {"create": True, "read": True, "update": True, "delete": True},
-                "locations": {"create": True, "read": True, "update": True, "delete": True},
-                "providers": {"create": True, "read": True, "update": True, "delete": True},
-                "cabinets": {"create": True, "read": True, "update": True, "delete": True},
-                "game_mixes": {"create": True, "read": True, "update": True, "delete": True},
-                "slot_machines": {"create": True, "read": True, "update": True, "delete": True},
-                "invoices": {"create": True, "read": True, "update": True, "delete": True},
-                "onjn_reports": {"create": True, "read": True, "update": True, "delete": True},
-                "legal_documents": {"create": True, "read": True, "update": True, "delete": True},
-                "users": {"create": True, "read": True, "update": True, "delete": True}
-            }
-        )
-        
-        admin_user_obj = User(
-            username="admin",
-            email="admin@financialplannerpro.com",
-            password_hash=hash_password("password"),
-            first_name="Administrator",
-            last_name="Sistem",
-            role=UserRole.ADMIN,
-            permissions=admin_permissions
-        )
-        
-        await db.users.insert_one(admin_user_obj.dict())
-        logger.info("Admin user created successfully")
-    else:
+    if admin_user:
         logger.info("Admin user already exists")
+    else:
+        logger.info("No admin user found - please create one manually")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8002)

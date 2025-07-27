@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import './app.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8002';
 const API = `${BACKEND_URL}/api`;
 
 // Calendar Component
@@ -216,6 +216,12 @@ const AvatarUpload = ({ entityType, entityId, currentAvatar, onAvatarChange }) =
     if (file) handleFileUpload(file);
   };
 
+  useEffect(() => {
+    if(entityType === 'game_mixes') {
+      console.log('AVATAR UPLOAD GAME MIX:', {entityType, entityId, currentAvatar});
+    }
+  }, [entityType, entityId, currentAvatar]);
+
   return (
     <div className="avatar-upload-container">
       <div
@@ -256,6 +262,244 @@ const AvatarUpload = ({ entityType, entityId, currentAvatar, onAvatarChange }) =
   );
 };
 
+// File Upload Component for PDF and other documents
+const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/png', 'image/jpeg'], maxSizeMB = 50 }) => {
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const { user } = useAuth();
+
+  const handleFileUpload = async (file) => {
+    // Validate file type
+    if (!acceptedTypes.includes(file.type)) {
+      alert(`Please select a valid file type. Accepted types: ${acceptedTypes.join(', ')}`);
+      return;
+    }
+
+    // Validate file size
+    if (file.size > maxSizeMB * 1024 * 1024) {
+      alert(`File size must be less than ${maxSizeMB}MB`);
+      return;
+    }
+
+    setUploading(true);
+    try {
+      // Convert file to base64
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.readAsDataURL(file);
+      });
+
+      // Upload to backend
+      const response = await fetch(`${API}/attachments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          filename: `document_${Date.now()}.${file.name.split('.').pop()}`,
+          original_filename: file.name,
+          file_size: file.size,
+          mime_type: file.type,
+          file_data: base64,
+          entity_type: entityType,
+          entity_id: entityId
+        })
+      });
+
+      if (response.ok) {
+        const attachment = await response.json();
+        onFileUpload(attachment);
+        alert('File uploaded successfully!');
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('Failed to upload file');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileUpload(file);
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) handleFileUpload(file);
+  };
+
+  return (
+    <div className="file-upload-container">
+      <div
+        className={`file-upload ${dragOver ? 'drag-over' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onClick={() => document.getElementById(`file-input-${entityId}`)?.click()}
+      >
+        <div className="file-upload-placeholder">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+          </svg>
+          <span>Click or drag to upload documents (PDF, Excel, Images)</span>
+          <small>Max size: {maxSizeMB}MB</small>
+        </div>
+        {uploading && (
+          <div className="upload-overlay">
+            <div className="spinner"></div>
+            <span>Uploading...</span>
+          </div>
+        )}
+      </div>
+      <input
+        id={`file-input-${entityId}`}
+        type="file"
+        accept={acceptedTypes.join(',')}
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
+    </div>
+  );
+};
+
+// Custom hook for fetching files
+const useFiles = (entityType, entityId) => {
+  const [files, setFiles] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchFiles = async () => {
+    if (!entityType || !entityId) return;
+    setLoading(true);
+    try {
+      const url = `${API}/attachments/${entityType}/${entityId}`;
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (response.ok) {
+        const attachments = await response.json();
+        // Filter out avatar files, keep only documents
+        const documentAttachments = attachments.filter(att => 
+          !att.mime_type.startsWith('image/') || 
+          (!att.filename.includes('avatar') && !att.filename.includes('custom_avatar'))
+        );
+        setFiles(documentAttachments);
+      }
+    } catch (error) {
+      console.error('Error fetching files:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFiles();
+  }, [entityType, entityId]);
+
+  return { files, setFiles, loading, refetch: fetchFiles };
+};
+
+// File Display Component
+const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
+  const { files, loading, refetch } = useFiles(entityType, entityId);
+
+  const handleDownload = async (attachment) => {
+    try {
+      const response = await fetch(`${API}/attachments/${attachment.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = attachment.original_filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Failed to download file');
+    }
+  };
+
+  const handleDelete = async (attachment) => {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+    
+    try {
+      const response = await fetch(`${API}/attachments/${attachment.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (response.ok) {
+        refetch();
+        if (onFileDelete) onFileDelete(attachment);
+      } else {
+        throw new Error('Delete failed');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('Failed to delete file');
+    }
+  };
+
+  const getFileIcon = (mimeType) => {
+    if (mimeType === 'application/pdf') return '📄';
+    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return '📊';
+    if (mimeType.startsWith('image/')) return '🖼️';
+    return '📎';
+  };
+
+  if (loading) {
+    return <div className="file-display-loading">Loading files...</div>;
+  }
+
+  if (files.length === 0) {
+    return <div className="file-display-empty">No files attached</div>;
+  }
+
+  return (
+    <div className="file-display">
+      <h4>Attached Files ({files.length})</h4>
+      <div className="file-list">
+        {files.map((file) => (
+          <div key={file.id} className="file-item">
+            <span className="file-icon">{getFileIcon(file.mime_type)}</span>
+            <span className="file-name">{file.original_filename}</span>
+            <span className="file-size">({(file.file_size / 1024 / 1024).toFixed(2)} MB)</span>
+            <div className="file-actions">
+              <button 
+                className="btn-download" 
+                onClick={() => handleDownload(file)}
+                title="Download"
+              >
+                ⬇️
+              </button>
+              <button 
+                className="btn-delete" 
+                onClick={() => handleDelete(file)}
+                title="Delete"
+              >
+                🗑️
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // Custom hook for fetching avatars
 const useAvatar = (entityType, entityId) => {
   const [avatar, setAvatar] = useState(null);
@@ -263,20 +507,25 @@ const useAvatar = (entityType, entityId) => {
 
   const fetchAvatar = async () => {
     if (!entityType || !entityId) return;
-    
     setLoading(true);
     try {
-      const response = await fetch(`${API}/attachments/${entityType}/${entityId}`, {
+      let url;
+      if (entityType === 'game_mixes') {
+        url = `${API}/attachments/game_mixes/${entityId}`;
+      } else {
+        url = `${API}/attachments/${entityType}/${entityId}`;
+      }
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      
       if (response.ok) {
         const attachments = await response.json();
-        // Find the first image attachment as avatar
+        console.log('Fetched attachments for', entityType, entityId, ':', attachments);
         const avatarAttachment = attachments.find(att => 
           att.mime_type.startsWith('image/') && 
-          att.filename.includes('avatar')
+          (att.filename.includes('avatar') || att.filename.includes('custom_avatar'))
         );
+        console.log('Found avatar attachment:', avatarAttachment);
         setAvatar(avatarAttachment || null);
       }
     } catch (error) {
@@ -293,35 +542,368 @@ const useAvatar = (entityType, entityId) => {
   return { avatar, setAvatar, loading, refetch: fetchAvatar };
 };
 
-// Avatar Display Component (for tables)
-const AvatarDisplay = ({ entityType, entityId, size = 40 }) => {
-  const { avatar, loading } = useAvatar(entityType, entityId);
+// Helper function to generate initials from entity name
+const generateInitials = (name, entityType) => {
+  console.log('INPUT:', name, '| TYPE:', entityType);
+  if (!name || typeof name !== 'string') {
+    console.log('GENERATE INITIALS: Invalid input, returning ?');
+    return '?';
+  }
+  // Extrage doar litere și cifre, ignoră simboluri
+  const words = name.trim().split(/\s+|-/).filter(Boolean);
+  console.log('WORDS:', words);
+  
+  // Pentru Cabinets: 1 + 5 cu cratimă (prima literă din primul cuvânt + "-" + primele 5 din al doilea)
+  if (entityType === 'cabinets' && words.length >= 2) {
+    const first = words[0].match(/[A-Za-z]/);
+    const second = words[1].match(/[A-Za-z0-9]{1,5}/);
+    const result = `${first ? first[0].toUpperCase() : ''}-${second ? second[0].toUpperCase() : ''}` || '?';
+    console.log('CABINETS 1+5:', result, '| first:', first?.[0], '| second:', second?.[0]);
+    return result;
+  }
+  
+  // Pentru Slots: primele 2 caractere din serial number
+  if (entityType === 'slots') {
+    const result = name.substring(0, 2).toUpperCase() || '?';
+    console.log('SLOTS 2 chars:', result);
+    return result;
+  }
+  
+  // Pentru restul: 1 + 2 (prima literă din primul cuvânt + primele 2 din al doilea)
+  if (words.length >= 2) {
+    const first = words[0].match(/[A-Za-z]/);
+    const second = words[1].match(/[A-Za-z0-9]{1,2}/);
+    const result = `${first ? first[0].toUpperCase() : ''}${second ? second[0].toUpperCase() : ''}` || '?';
+    console.log('DEFAULT 1+2:', result, '| first:', first?.[0], '| second:', second?.[0]);
+    return result;
+  } else if (words.length === 1) {
+    const match = words[0].match(/[A-Za-z0-9]{1,2}/);
+    const result = match ? match[0].toUpperCase() : '?';
+    console.log('SINGLE WORD:', result, '| match:', match?.[0]);
+    return result;
+  }
+  console.log('GENERATE INITIALS: No words found, returning ?');
+  return '?';
+};
 
-  if (loading) {
+// Custom Avatar Editor Component
+const CustomAvatarEditor = ({ entityType, entityId, currentAvatar, onAvatarChange, entityName }) => {
+  const [customText, setCustomText] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
+
+  useEffect(() => {
+    if (entityName) {
+      setCustomText(generateInitials(entityName, entityType));
+    } else {
+      setCustomText(generateInitials('Unknown', entityType));
+    }
+  }, [entityName, entityType]);
+
+  const handleSaveCustomAvatar = async () => {
+    if (customText.trim()) {
+      try {
+        // Creează un canvas pentru a genera avatar-ul personalizat
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 200;
+        canvas.height = 200;
+
+        // Fundal albastru
+        ctx.fillStyle = '#1976d2';
+        ctx.fillRect(0, 0, 200, 200);
+
+        // Text alb bold, font adaptiv, shadow pentru contrast
+        ctx.font = 'bold 90px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur = 8;
+        const text = customText.substring(0, 8).toUpperCase();
+        ctx.fillText(text, 100, 100);
+        ctx.shadowBlur = 0;
+
+        // Convertește la base64
+        const dataURL = canvas.toDataURL('image/png');
+        
+        // Creează obiectul avatar pentru upload
+        const avatarData = {
+          filename: `custom_avatar_${entityType}_${entityId}_${Date.now()}.png`,
+          original_filename: `custom_avatar_${entityType}_${entityId}.png`,
+          file_size: Math.round((dataURL.length * 3) / 4), // Aproximare dimensiune
+          mime_type: 'image/png',
+          file_data: dataURL.split(',')[1], // Elimină prefixul data:image/png;base64,
+          entity_type: entityType,
+          entity_id: entityId
+        };
+
+        // Upload la backend
+        const response = await fetch(`${API}/attachments`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify(avatarData)
+        });
+
+        if (response.ok) {
+          const uploadedAvatar = await response.json();
+          onAvatarChange(uploadedAvatar);
+          alert('Custom avatar saved successfully!');
+        } else {
+          throw new Error('Failed to save avatar');
+        }
+      } catch (error) {
+        console.error('Error saving custom avatar:', error);
+        alert('Failed to save custom avatar. Please try again.');
+      }
+      
+      setIsEditing(false);
+      setShowEditor(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setCustomText(generateInitials(entityName || 'Unknown', entityType));
+    setIsEditing(false);
+    setShowEditor(false);
+  };
+
+  return (
+    <div className="custom-avatar-editor">
+      <div className="avatar-preview-section">
+        <div className="avatar-preview">
+          <div
+            className="custom-avatar-display"
+            style={{
+              width: '68px',
+              height: '68px',
+              background: '#1976d2',
+              color: '#ffffff',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%',
+              fontSize: '20px', // Font proporțional pentru 68px
+              cursor: 'pointer',
+              border: '2px solid #ddd',
+              boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)'
+            }}
+            onClick={() => setShowEditor(!showEditor)}
+            title="Click to edit custom avatar"
+          >
+            {customText.substring(0, 8).toUpperCase()}
+          </div>
+        </div>
+        
+        <div className="avatar-actions">
+          <button
+            type="button"
+            className="btn-edit-avatar"
+            onClick={() => setShowEditor(!showEditor)}
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              background: '#1976d2',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              marginTop: '8px'
+            }}
+          >
+            ✏️ Edit Custom Avatar
+          </button>
+        </div>
+      </div>
+
+      {showEditor && (
+        <div className="avatar-editor-modal">
+          <div className="editor-content">
+            <h4>Custom Avatar Editor</h4>
+            <div className="editor-input">
+              <label>Custom Text (max 8 characters):</label>
+              <input
+                type="text"
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value.substring(0, 8))}
+                maxLength={8}
+                placeholder="Enter custom text"
+                style={{
+                  padding: '8px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  width: '200px'
+                }}
+              />
+            </div>
+            
+            <div className="editor-preview">
+              <h5>Preview:</h5>
+              <div
+                className="preview-avatar"
+                style={{
+                  width: '120px',
+                  height: '120px',
+                  background: '#1976d2',
+                  color: '#ffffff',
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '50%',
+                  fontSize: '36px', // Font proporțional pentru 120px
+                  margin: '10px auto',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+                }}
+              >
+                {customText.substring(0, 8).toUpperCase()}
+              </div>
+            </div>
+
+            <div className="editor-actions">
+              <button
+                type="button"
+                onClick={handleSaveCustomAvatar}
+                style={{
+                  padding: '8px 16px',
+                  background: '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  marginRight: '8px'
+                }}
+              >
+                Save Avatar
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                style={{
+                  padding: '8px 16px',
+                  background: '#f44336',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Avatar Display Component (for tables)
+const AvatarDisplay = ({ entityType, entityId, size = 50, entityName, rectangular, blueBgIfNoAvatar }) => {
+  const { avatar, loading } = useAvatar(entityType, entityId);
+  
+  console.log('AvatarDisplay render:', { entityType, entityId, entityName, avatar, loading });
+
+  // Game Mixes: avatar dreptunghiular 20x95 sau text pe fundal albastru
+  if (entityType === 'game_mixes') {
+    const width = 20, height = 95;
+    if (loading) {
+      return (
+        <div className="avatar-display loading rectangular" style={{ width, height }}>
+          <div className="spinner-small"></div>
+        </div>
+      );
+    }
+    if (avatar) {
+      return (
+        <img
+          src={`data:${avatar.mime_type};base64,${avatar.file_data}`}
+          alt="Avatar"
+          className="avatar-display rectangular"
+          style={{ width, height, objectFit: 'cover' }}
+        />
+      );
+    }
+    
     return (
-      <div className="avatar-display loading" style={{ width: size, height: size }}>
-        <div className="spinner-small"></div>
+      <div
+        className="avatar-display rectangular blue-bg-avatar"
+        style={{
+          width,
+          height,
+          background: '#1976d2',
+          color: '#fff',
+          fontWeight: 'bold',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 4,
+          fontSize: 12,
+          whiteSpace: 'normal',
+          wordBreak: 'break-word',
+          textAlign: 'center',
+          padding: '0 4px',
+          lineHeight: '1.1',
+          overflow: 'visible',
+        }}
+        title={entityName}
+      >
+        <span style={{width: '100%', wordBreak: 'break-word', whiteSpace: 'normal'}}>{entityName}</span>
       </div>
     );
   }
 
+  // Restul modulelor: avatar rotund/pătrat 50x50, cu inițiale dacă nu există poză, fundal transparent
+  let width = 50, height = 50;
+  if (loading) {
+    return (
+      <div className="avatar-display loading" style={{ width, height }}>
+        <div className="spinner-small"></div>
+      </div>
+    );
+  }
   if (avatar) {
+    console.log('Rendering avatar image:', avatar);
     return (
       <img
         src={`data:${avatar.mime_type};base64,${avatar.file_data}`}
         alt="Avatar"
         className="avatar-display"
-        style={{ width: size, height: size }}
+        style={{ width, height, objectFit: 'cover', borderRadius: '50%' }}
       />
     );
   }
-
-  // Default avatar with initials or icon
+  // Inițiale cu fundal albastru pentru toate avatarele editabile
+  const initials = generateInitials(entityName || 'Unknown', entityType) || '?';
+  console.log('Generated initials:', initials, 'for entity:', entityName, 'type:', entityType);
+  
+  // Calculează dimensiunea fontului proporțională cu dimensiunea avatar-ului
+  const fontSize = Math.max(12, Math.min(width * 0.4, 24)); // Între 12px și 24px, proporțional cu dimensiunea
+  
   return (
-    <div className="avatar-display default" style={{ width: size, height: size }}>
-      <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-      </svg>
+    <div
+      className="avatar-display"
+      style={{
+        width,
+        height,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 700,
+        fontSize: `${fontSize}px`, // Font proporțional cu dimensiunea avatar-ului
+        color: '#ffffff', // Text alb pentru toate
+        background: '#1976d2', // Background albastru pentru toate
+        boxShadow: '0 4px 8px rgba(0,0,0,0.3)', // Umbră pentru toate
+      }}
+      title={entityName}
+    >
+      {initials}
     </div>
   );
 };
@@ -329,6 +911,41 @@ const AvatarDisplay = ({ entityType, entityId, size = 40 }) => {
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Auto-logout after 15 minutes of inactivity
+  useEffect(() => {
+    let inactivityTimer;
+
+    const resetTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        if (user) {
+          localStorage.removeItem('token');
+          setUser(null);
+          alert('You have been logged out due to inactivity.');
+        }
+      }, 15 * 60 * 1000); // 15 minutes
+    };
+
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+
+    if (user) {
+      // Start timer
+      resetTimer();
+      
+      // Add event listeners for user activity
+      events.forEach(event => {
+        document.addEventListener(event, resetTimer, true);
+      });
+    }
+
+    return () => {
+      clearTimeout(inactivityTimer);
+      events.forEach(event => {
+        document.removeEventListener(event, resetTimer, true);
+      });
+    };
+  }, [user]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -392,13 +1009,15 @@ const getEntityDisplayName = (type) => {
     invoices: 'Invoice',
     onjn: 'ONJN Report',
     legal: 'Legal Document',
-    users: 'User'
+    users: 'User',
+    metrology: 'Metrology',
+    jackpots: 'Jackpot'
   };
   return names[type] || type;
 };
 
 // Bulk Edit Form Component
-const BulkEditForm = ({ entityType, selectedItems, onSave, onClose }) => {
+const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, locations, providers, cabinets, gameMixes, slotMachines }) => {
   const [formData, setFormData] = useState({});
 
   const handleChange = (field, value) => {
@@ -419,12 +1038,14 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose }) => {
       locations: ['name', 'address', 'status'], 
       providers: ['email', 'phone', 'status'],
       cabinets: ['status'],
-      slots: ['status', 'denomination', 'max_bet'],
+      slots: ['cabinet_id', 'game_mix_id', 'provider_id', 'model', 'serial_number', 'denomination', 'max_bet', 'rtp', 'gaming_places', 'commission_date', 'invoice_number', 'status', 'location_id', 'production_year', 'ownership_type', 'owner_company_id', 'lease_provider_id', 'lease_contract_number'],
       gamemixes: ['status'],
       invoices: ['status'],
       onjn: ['status'],
       legal: ['status'],
-      users: ['role', 'is_active']
+      users: ['role', 'is_active'],
+                       metrology: ['serial_number', 'certificate_number', 'certificate_type', 'issue_date', 'issuing_authority', 'cvt_type', 'cvt_expiry_date', 'status', 'description'],
+      jackpots: ['status', 'jackpot_type', 'current_amount']
     };
     return commonFields[type] || ['status'];
   };
@@ -491,6 +1112,286 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose }) => {
           </div>
         );
       default:
+        // Handle metrology specific fields
+        if (entityType === 'metrology') {
+          switch (field) {
+            case 'serial_number':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Serial Number</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {slotMachines && slotMachines.map(slot => (
+                      <option key={slot.serial_number} value={slot.serial_number}>
+                        {slot.serial_number} - {slot.model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'certificate_type':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Certificate Type</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    <option value="calibration">Calibration</option>
+                    <option value="verification">Verification</option>
+                    <option value="certification">Certification</option>
+                  </select>
+                </div>
+              );
+            case 'cvt_type':
+              return (
+                <div className="form-group" key={field}>
+                  <label>CVT Type</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    <option value="periodic">Periodic</option>
+                    <option value="reparation">Reparation</option>
+                  </select>
+                </div>
+              );
+            case 'issue_date':
+            case 'cvt_expiry_date':
+              return (
+                <div className="form-group" key={field}>
+                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
+                  <Calendar
+                    value={formData[field] || ''}
+                    onChange={(date) => handleChange(field, date)}
+                    placeholder={`Select new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
+                  />
+                </div>
+              );
+
+            case 'description':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Description</label>
+                  <textarea
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                    placeholder="Enter new description (leave empty to keep unchanged)"
+                    rows="3"
+                  />
+                </div>
+              );
+            default:
+              return (
+                <div className="form-group" key={field}>
+                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
+                  <input
+                    type="text"
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                    placeholder={`Enter new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
+                  />
+                </div>
+              );
+          }
+        }
+        
+        // Handle slots specific fields
+        if (entityType === 'slots') {
+          switch (field) {
+            case 'cabinet_id':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Cabinet</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {cabinets && cabinets.map(cabinet => (
+                      <option key={cabinet.id} value={cabinet.id}>
+                        {cabinet.name} - {cabinet.model || 'No Model'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'game_mix_id':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Game Mix</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {gameMixes && gameMixes.map(gameMix => (
+                      <option key={gameMix.id} value={gameMix.id}>
+                        {gameMix.name} ({gameMix.game_count} games)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'provider_id':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Provider</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {providers && providers.map(provider => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.company_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'location_id':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Location</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {locations && locations.map(location => (
+                      <option key={location.id} value={location.id}>
+                        {location.name} - {location.city}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'ownership_type':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Ownership Type</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    <option value="property">Property</option>
+                    <option value="rent">Rent</option>
+                  </select>
+                </div>
+              );
+            case 'owner_company_id':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Owner Company</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {companies && companies.map(company => (
+                      <option key={company.id} value={company.id}>
+                        {company.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'lease_provider_id':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Lease Provider</label>
+                  <select
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                  >
+                    <option value="">Keep unchanged</option>
+                    {providers && providers.map(provider => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.company_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            case 'denomination':
+            case 'max_bet':
+            case 'rtp':
+              return (
+                <div className="form-group" key={field}>
+                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, parseFloat(e.target.value))}
+                    placeholder={`Enter new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
+                  />
+                </div>
+              );
+            case 'gaming_places':
+            case 'production_year':
+              return (
+                <div className="form-group" key={field}>
+                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, parseInt(e.target.value))}
+                    placeholder={`Enter new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
+                  />
+                </div>
+              );
+            case 'commission_date':
+              return (
+                <div className="form-group" key={field}>
+                  <label>Commission Date</label>
+                  <Calendar
+                    value={formData[field] || ''}
+                    onChange={(date) => handleChange(field, date)}
+                    placeholder="Select new commission date (leave empty to keep unchanged)"
+                  />
+                </div>
+              );
+            case 'model':
+            case 'serial_number':
+            case 'invoice_number':
+            case 'lease_contract_number':
+              return (
+                <div className="form-group" key={field}>
+                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
+                  <input
+                    type="text"
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                    placeholder={`Enter new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
+                  />
+                </div>
+              );
+            default:
+              return (
+                <div className="form-group" key={field}>
+                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
+                  <input
+                    type="text"
+                    value={formData[field] || ''}
+                    onChange={(e) => handleChange(field, e.target.value)}
+                    placeholder={`Enter new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
+                  />
+                </div>
+              );
+          }
+        }
+        
+        // Handle other entity types
         return (
           <div className="form-group" key={field}>
             <label>{field.charAt(0).toUpperCase() + field.slice(1)}</label>
@@ -532,7 +1433,19 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const { login } = useAuth();
+
+  // Load saved credentials on component mount
+  useEffect(() => {
+    const savedCredentials = localStorage.getItem('savedCredentials');
+    if (savedCredentials) {
+      const { username: savedUsername, password: savedPassword } = JSON.parse(savedCredentials);
+      setUsername(savedUsername || '');
+      setPassword(savedPassword || '');
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -541,6 +1454,17 @@ const Login = () => {
     
     try {
       await login(username, password);
+      
+      // Save credentials if remember me is checked
+      if (rememberMe) {
+        localStorage.setItem('savedCredentials', JSON.stringify({
+          username: username,
+          password: password
+        }));
+      } else {
+        // Remove saved credentials if remember me is unchecked
+        localStorage.removeItem('savedCredentials');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -591,6 +1515,18 @@ const Login = () => {
               placeholder="Enter your password"
             />
           </div>
+
+          <div className="form-group">
+            <label className="remember-me-label">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="remember-me-checkbox"
+              />
+              <span className="remember-me-text">Remember my password</span>
+            </label>
+          </div>
           
           {error && <div className="error-message">{error}</div>}
           
@@ -609,7 +1545,7 @@ const Login = () => {
 };
 
 // Generic Entity Form Component
-const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations, providers, cabinets, gameMixes, invoices }) => {
+const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations, providers, cabinets, gameMixes, invoices, users, slotMachines }) => {
   const [formData, setFormData] = useState({});
   
   // Avatar state
@@ -648,7 +1584,14 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         country: 'Romania',
         postal_code: '',
         company_id: '',
-        manager_id: ''
+        manager_id: '',
+        manager_phone: '',
+        manager_email: '',
+        contact_person_type: 'manual',
+        contact_person_id: '',
+        contact_person: '',
+        contact_email: '',
+        contact_phone: ''
       },
       providers: {
         name: '',
@@ -669,6 +1612,11 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         game_mix_id: '',
         provider_id: '',
         model: '',
+        production_year: new Date().getFullYear(),
+        location_id: '',
+        ownership_type: '',
+        owner_company_id: '',
+        lease_provider_id: '',
         serial_number: '',
         denomination: 0.10,
         max_bet: 100.00,
@@ -692,6 +1640,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         amount: 0,
         currency: 'EUR',
+        status: 'pending',
         description: ''
       },
       onjn: {
@@ -708,8 +1657,28 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         company_id: '',
         location_id: '',
         issue_date: '',
-        expiry_date: '',
         issuing_authority: '',
+        description: ''
+      },
+      metrology: {
+        serial_number: '',
+        certificate_number: '',
+        certificate_type: 'calibration',
+        issue_date: new Date().toISOString().split('T')[0],
+        issuing_authority: '',
+        cvt_type: 'periodic',
+        cvt_expiry_date: '',
+        status: 'active',
+        description: ''
+      },
+      jackpots: {
+        serial_number: '',
+        jackpot_type: 'progressive',
+        jackpot_name: '',
+        current_amount: 0,
+        max_amount: 10000,
+        reset_amount: 100,
+        increment_rate: 0.1,
         description: ''
       }
     };
@@ -722,7 +1691,60 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
   };
 
   const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const newData = { ...prev, [field]: value };
+      
+      // If provider changes in slots form, reset cabinet and game mix selection
+      if (entityType === 'slots' && field === 'provider_id') {
+        newData.cabinet_id = '';
+        newData.game_mix_id = '';
+        newData.model = ''; // Reset model when provider changes
+      }
+      
+      // If cabinet changes in slots form, auto-fill model from selected cabinet
+      if (entityType === 'slots' && field === 'cabinet_id' && value) {
+        const selectedCabinet = cabinets.find(cabinet => cabinet.id === value);
+        if (selectedCabinet) {
+          newData.model = selectedCabinet.model || `${selectedCabinet.name} Model`;
+        } else {
+          newData.model = '';
+        }
+      }
+      
+      // If manager changes in locations form, auto-fill phone and email
+      if (entityType === 'locations' && field === 'manager_id') {
+        if (value) {
+          const selectedManager = users.find(user => user.id === value);
+          if (selectedManager) {
+            newData.manager_phone = selectedManager.phone || '';
+            newData.manager_email = selectedManager.email || '';
+          }
+        } else {
+          // Clear manager details if no manager is selected
+          newData.manager_phone = '';
+          newData.manager_email = '';
+        }
+      }
+      
+      // If contact person changes in locations form, auto-fill contact details
+      if (entityType === 'locations' && field === 'contact_person_id') {
+        if (value) {
+          const selectedContact = users.find(user => user.id === value);
+          if (selectedContact) {
+            newData.contact_person = `${selectedContact.first_name || ''} ${selectedContact.last_name || ''}`.trim() || selectedContact.username;
+            newData.contact_email = selectedContact.email || '';
+            newData.contact_phone = selectedContact.phone || '';
+          }
+        } else {
+          // Clear contact details if no contact person is selected
+          newData.contact_person = '';
+          newData.contact_email = '';
+          newData.contact_phone = '';
+        }
+      }
+      
+      return newData;
+    });
   };
 
   const handleGamesChange = (games) => {
@@ -772,7 +1794,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               />
             </div>
             <div className="form-group">
-              <label>Phone *</label>
+              <label>📞 Phone *</label>
               <input
                 type="tel"
                 value={formData.phone || ''}
@@ -781,7 +1803,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               />
             </div>
             <div className="form-group">
-              <label>Email *</label>
+              <label>📧 Email *</label>
               <input
                 type="email"
                 value={formData.email || ''}
@@ -798,6 +1820,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               />
             </div>
             {entity && (
+              <>
               <div className="form-group">
                 <label>Company Logo</label>
                 <div className="avatar-section">
@@ -808,7 +1831,30 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                     onAvatarChange={handleAvatarChange}
                   />
                 </div>
+                <div className="form-group">
+                  <label>Custom Avatar Editor</label>
+                  <CustomAvatarEditor
+                    entityType="companies"
+                    entityId={entity.id}
+                    currentAvatar={avatar}
+                    onAvatarChange={handleAvatarChange}
+                    entityName={formData.name}
+                  />
+                </div>
               </div>
+                <div className="form-group">
+                  <label>Company Documents</label>
+                  <FileUpload
+                    entityType="companies"
+                    entityId={entity.id}
+                    onFileUpload={() => fetchFiles && fetchFiles()}
+                  />
+                  <FileDisplay
+                    entityType="companies"
+                    entityId={entity.id}
+                  />
+                </div>
+              </>
             )}
           </>
         );
@@ -882,6 +1928,124 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 required
               />
             </div>
+            <div className="form-group">
+              <label>Manager</label>
+              <select
+                value={formData.manager_id || ''}
+                onChange={(e) => handleChange('manager_id', e.target.value)}
+              >
+                <option value="">Select Manager</option>
+                {users.map(user => (
+                  <option key={user.id} value={user.id}>
+                    {user.username} - {user.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Manager Phone</label>
+              <input
+                type="text"
+                value={formData.manager_phone || ''}
+                onChange={(e) => handleChange('manager_phone', e.target.value)}
+                placeholder="Auto-populated when manager is selected"
+                readOnly
+              />
+            </div>
+            <div className="form-group">
+              <label>Manager Email</label>
+              <input
+                type="email"
+                value={formData.manager_email || ''}
+                onChange={(e) => handleChange('manager_email', e.target.value)}
+                placeholder="Auto-populated when manager is selected"
+                readOnly
+              />
+            </div>
+            <div className="form-group">
+              <label>Contact Person Type</label>
+              <select
+                value={formData.contact_person_type || 'manual'}
+                onChange={(e) => handleChange('contact_person_type', e.target.value)}
+              >
+                <option value="manual">Manual Entry</option>
+                <option value="user">Select from Users</option>
+              </select>
+            </div>
+            {formData.contact_person_type === 'user' ? (
+              <div className="form-group">
+                <label>Contact Person (User)</label>
+                <select
+                  value={formData.contact_person_id || ''}
+                  onChange={(e) => handleChange('contact_person_id', e.target.value)}
+                >
+                  <option value="">Select User</option>
+                  {users.map(user => (
+                    <option key={user.id} value={user.id}>
+                      {user.first_name && user.last_name ? 
+                        `${user.first_name} ${user.last_name}` : 
+                        user.username} - {user.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <>
+                <div className="form-group">
+                  <label>Contact Person Name</label>
+                  <input
+                    type="text"
+                    value={formData.contact_person || ''}
+                    onChange={(e) => handleChange('contact_person', e.target.value)}
+                    placeholder="Enter contact person name"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Contact Person Email</label>
+                  <input
+                    type="email"
+                    value={formData.contact_email || ''}
+                    onChange={(e) => handleChange('contact_email', e.target.value)}
+                    placeholder="Enter contact person email"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Contact Person Phone</label>
+                  <input
+                    type="tel"
+                    value={formData.contact_phone || ''}
+                    onChange={(e) => handleChange('contact_phone', e.target.value)}
+                    placeholder="Enter contact person phone"
+                  />
+                </div>
+              </>
+            )}
+            {entity && (
+              <>
+              <div className="form-group">
+                <label>Location Avatar</label>
+                <CustomAvatarEditor
+                  entityType="locations"
+                  entityId={entity.id}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  entityName={formData.name}
+                />
+              </div>
+                <div className="form-group">
+                  <label>Location Documents</label>
+                  <FileUpload
+                    entityType="locations"
+                    entityId={entity.id}
+                    onFileUpload={() => fetchFiles && fetchFiles()}
+                  />
+                  <FileDisplay
+                    entityType="locations"
+                    entityId={entity.id}
+                  />
+                </div>
+              </>
+            )}
           </>
         );
 
@@ -916,7 +2080,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               />
             </div>
             <div className="form-group">
-              <label>Email *</label>
+              <label>📧 Email *</label>
               <input
                 type="email"
                 value={formData.email || ''}
@@ -925,7 +2089,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               />
             </div>
             <div className="form-group">
-              <label>Phone *</label>
+              <label>📞 Phone *</label>
               <input
                 type="tel"
                 value={formData.phone || ''}
@@ -1011,6 +2175,16 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                     onAvatarChange={handleAvatarChange}
                   />
                 </div>
+                <div className="form-group">
+                  <label>Custom Avatar Editor</label>
+                  <CustomAvatarEditor
+                    entityType="cabinets"
+                    entityId={entity.id}
+                    currentAvatar={avatar}
+                    onAvatarChange={handleAvatarChange}
+                    entityName={formData.name}
+                  />
+                </div>
               </div>
             )}
           </>
@@ -1019,21 +2193,6 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
       case 'slots':
         return (
           <>
-            <div className="form-group">
-              <label>Cabinet *</label>
-              <select
-                value={formData.cabinet_id || ''}
-                onChange={(e) => handleChange('cabinet_id', e.target.value)}
-                required
-              >
-                <option value="">Select Cabinet</option>
-                {cabinets.map(cabinet => (
-                  <option key={cabinet.id} value={cabinet.id}>
-                    {cabinet.manufacturer} {cabinet.model} - {cabinet.serial_number}
-                  </option>
-                ))}
-              </select>
-            </div>
             <div className="form-group">
               <label>Provider *</label>
               <select
@@ -1048,6 +2207,31 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               </select>
             </div>
             <div className="form-group">
+              <label>Cabinet *</label>
+              <select
+                value={formData.cabinet_id || ''}
+                onChange={(e) => handleChange('cabinet_id', e.target.value)}
+                required
+              >
+                <option value="">Select Cabinet</option>
+                {cabinets
+                  .filter(cabinet => {
+                    // Show all cabinets if no provider selected
+                    if (!formData.provider_id) return true;
+                    // Show only cabinets that match the selected provider
+                    return cabinet.provider_id === formData.provider_id;
+                  })
+                  .map(cabinet => {
+                    const provider = providers.find(p => p.id === cabinet.provider_id);
+                    return (
+                      <option key={cabinet.id} value={cabinet.id}>
+                        {cabinet.name} ({provider ? provider.name : 'Unknown Provider'})
+                      </option>
+                    );
+                  })}
+              </select>
+            </div>
+            <div className="form-group">
               <label>Game Mix *</label>
               <select
                 value={formData.game_mix_id || ''}
@@ -1055,32 +2239,33 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 required
               >
                 <option value="">Select Game Mix</option>
-                {gameMixes.map(mix => (
-                  <option key={mix.id} value={mix.id}>{mix.name}</option>
-                ))}
+                {gameMixes
+                  .filter(mix => {
+                    // Show all game mixes if no provider selected
+                    if (!formData.provider_id) return true;
+                    // Show only game mixes that match the selected provider
+                    return mix.provider_id === formData.provider_id;
+                  })
+                  .map(mix => {
+                    const provider = providers.find(p => p.id === mix.provider_id);
+                    return (
+                      <option key={mix.id} value={mix.id}>
+                        {mix.name} ({provider ? provider.name : 'Unknown Provider'})
+                      </option>
+                    );
+                  })}
               </select>
             </div>
             <div className="form-group">
-              <label>Serial Numbers *</label>
+              <label>Serial Number *</label>
               <input
                 type="text"
-                value={formData.serial_numbers || ''}
-                onChange={(e) => handleChange('serial_numbers', e.target.value)}
+                value={formData.serial_number || ''}
+                onChange={(e) => handleChange('serial_number', e.target.value)}
                 required
-                placeholder="e.g., SER001 SER002 SER003 (space separated)"
+                placeholder="e.g., SER001"
               />
-              <small className="field-help">Enter one or multiple serial numbers separated by spaces</small>
-            </div>
-            <div className="form-group">
-              <label>Serial Numbers *</label>
-              <input
-                type="text"
-                value={formData.serial_numbers || ''}
-                onChange={(e) => handleChange('serial_numbers', e.target.value)}
-                required
-                placeholder="e.g., SER001 SER002 SER003 (space separated)"
-              />
-              <small className="field-help">Enter one or multiple serial numbers separated by spaces</small>
+              <small className="field-help">Enter the unique serial number for this slot machine</small>
             </div>
             <div className="form-group">
               <label>Invoice Number</label>
@@ -1101,10 +2286,91 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               <input
                 type="text"
                 value={formData.model || ''}
-                onChange={(e) => handleChange('model', e.target.value)}
+                readOnly
                 required
+                placeholder="Auto-filled from selected cabinet"
+              />
+              <small className="field-help">Model is automatically filled based on the selected cabinet</small>
+            </div>
+            <div className="form-group">
+              <label>Production Year *</label>
+              <input
+                type="number"
+                min="1980"
+                max={new Date().getFullYear()}
+                value={formData.production_year || ''}
+                onChange={(e) => handleChange('production_year', parseInt(e.target.value))}
+                required
+                placeholder="e.g., 2023"
               />
             </div>
+            <div className="form-group">
+              <label>Location *</label>
+              <select
+                value={formData.location_id || ''}
+                onChange={(e) => handleChange('location_id', e.target.value)}
+                required
+              >
+                <option value="">All Locations</option>
+                {locations.map(location => (
+                  <option key={location.id} value={location.id}>{location.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Ownership Type *</label>
+              <select
+                value={formData.ownership_type || ''}
+                onChange={(e) => handleChange('ownership_type', e.target.value)}
+                required
+              >
+                <option value="">Select Ownership Type</option>
+                <option value="property">Property (Owned)</option>
+                <option value="rent">Rent (Leased)</option>
+              </select>
+            </div>
+            {formData.ownership_type === 'property' && (
+              <div className="form-group">
+                <label>Owner Company *</label>
+                <select
+                  value={formData.owner_company_id || ''}
+                  onChange={(e) => handleChange('owner_company_id', e.target.value)}
+                  required
+                >
+                  <option value="">Select Owner Company</option>
+                  {companies.map(company => (
+                    <option key={company.id} value={company.id}>{company.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {formData.ownership_type === 'rent' && (
+              <>
+                <div className="form-group">
+                  <label>Lease Provider *</label>
+                  <select
+                    value={formData.lease_provider_id || ''}
+                    onChange={(e) => handleChange('lease_provider_id', e.target.value)}
+                    required
+                  >
+                    <option value="">Select Lease Provider</option>
+                    {providers.map(provider => (
+                      <option key={provider.id} value={provider.id}>{provider.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Lease Contract Number *</label>
+                  <input
+                    type="text"
+                    value={formData.lease_contract_number || ''}
+                    onChange={(e) => handleChange('lease_contract_number', e.target.value)}
+                    required
+                    placeholder="e.g., LC-2024-001"
+                  />
+                </div>
+              </>
+            )}
             <div className="form-group">
               <label>Denomination (€) *</label>
               <input
@@ -1152,6 +2418,43 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 placeholder="Select commission date"
               />
             </div>
+            {entity && (
+              <>
+              <div className="form-group">
+                <label>Slot Machine Avatar</label>
+                <div className="avatar-section">
+                  <AvatarUpload
+                    entityType="slots"
+                    entityId={entity.id}
+                    currentAvatar={avatar}
+                    onAvatarChange={handleAvatarChange}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Custom Avatar Editor</label>
+                  <CustomAvatarEditor
+                    entityType="slots"
+                    entityId={entity.id}
+                    currentAvatar={avatar}
+                    onAvatarChange={handleAvatarChange}
+                    entityName={formData.serial_number}
+                  />
+                </div>
+              </div>
+                <div className="form-group">
+                  <label>Slot Machine Documents</label>
+                  <FileUpload
+                    entityType="slots"
+                    entityId={entity.id}
+                    onFileUpload={() => fetchFiles && fetchFiles()}
+                  />
+                  <FileDisplay
+                    entityType="slots"
+                    entityId={entity.id}
+                  />
+                </div>
+              </>
+            )}
           </>
         );
 
@@ -1229,36 +2532,40 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               />
             </div>
             <div className="form-group">
-              <label>Company *</label>
-              <select
-                value={formData.company_id || ''}
-                onChange={(e) => handleChange('company_id', e.target.value)}
-                required
-              >
-                <option value="">Select Company</option>
-                {companies.map(company => (
-                  <option key={company.id} value={company.id}>{company.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
               <label>Location *</label>
               <select
                 value={formData.location_id || ''}
                 onChange={(e) => handleChange('location_id', e.target.value)}
                 required
               >
-                <option value="">Select Location</option>
-                {locations
-                  .filter(location => {
-                    // Show all locations if no company selected
-                    if (!formData.company_id) return true;
-                    // Show locations that match the selected company
-                    return location.company_id === formData.company_id;
-                  })
-                  .map(location => (
-                    <option key={location.id} value={location.id}>{location.name}</option>
-                  ))}
+                <option value="">All Locations</option>
+                {locations.map(location => (
+                  <option key={location.id} value={location.id}>{location.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Buyer</label>
+              <select
+                value={formData.buyer_id || ''}
+                onChange={(e) => handleChange('buyer_id', e.target.value)}
+              >
+                <option value="">Select Buyer (Company)</option>
+                {companies.map(company => (
+                  <option key={company.id} value={company.id}>{company.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Seller</label>
+              <select
+                value={formData.seller_id || ''}
+                onChange={(e) => handleChange('seller_id', e.target.value)}
+              >
+                <option value="">Select Seller (Provider)</option>
+                {providers.map(provider => (
+                  <option key={provider.id} value={provider.id}>{provider.name}</option>
+                ))}
               </select>
             </div>
             <div className="form-group">
@@ -1334,6 +2641,69 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
           </>
         );
 
+      case 'metrology':
+        return (
+          <>
+            <div className="form-group">
+              <label>Serial Numbers *</label>
+              <textarea 
+                value={formData.serial_number || ''} 
+                onChange={(e) => handleChange('serial_number', e.target.value)} 
+                required 
+                placeholder="Enter serial numbers separated by space (e.g., 188686 2547364 100393)"
+                rows="3"
+              />
+            </div>
+            <div className="form-group">
+              <label>Certificate Number *</label>
+              <input type="text" value={formData.certificate_number || ''} onChange={(e) => handleChange('certificate_number', e.target.value)} required />
+            </div>
+            <div className="form-group">
+              <label>Certificate Type *</label>
+              <select value={formData.certificate_type || ''} onChange={(e) => handleChange('certificate_type', e.target.value)} required>
+                <option value="">Select Type</option>
+                <option value="calibration">Calibration</option>
+                <option value="verification">Verification</option>
+                <option value="certification">Certification</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Issue Date *</label>
+              <Calendar value={formData.issue_date} onChange={(date) => handleChange('issue_date', date)} />
+            </div>
+            
+            <div className="form-group">
+              <label>Issuing Authority *</label>
+              <input type="text" value={formData.issuing_authority || ''} onChange={(e) => handleChange('issuing_authority', e.target.value)} required />
+            </div>
+
+
+            <div className="form-group">
+              <label>CVT Type</label>
+              <select value={formData.cvt_type || ''} onChange={(e) => handleChange('cvt_type', e.target.value)}>
+                <option value="">Select CVT Type</option>
+                <option value="periodic">Periodic</option>
+                <option value="reparation">Reparation</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>CVT End Date</label>
+              <Calendar value={formData.cvt_expiry_date} onChange={(date) => handleChange('cvt_expiry_date', date)} />
+            </div>
+            <div className="form-group">
+              <label>Description *</label>
+              <textarea value={formData.description || ''} onChange={(e) => handleChange('description', e.target.value)} required rows="3" />
+            </div>
+            {entity && (
+              <div className="form-group">
+                <label>Metrology Documents</label>
+                <FileUpload entityType="metrology" entityId={entity.id} onFileUpload={() => fetchFiles && fetchFiles()} />
+                <FileDisplay entityType="metrology" entityId={entity.id} />
+              </div>
+            )}
+          </>
+        );
+
       default:
         return <div>Form not implemented for {entityType}</div>;
     }
@@ -1349,7 +2719,9 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
       gamemixes: 'Game Mix',
       invoices: 'Invoice',
       onjn: 'ONJN Report',
-      legal: 'Legal Document'
+      legal: 'Legal Document',
+      metrology: 'Metrology',
+      jackpots: 'Jackpot'
     };
     return titles[entityType] || 'Entity';
   };
@@ -1407,6 +2779,8 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
         invoices: true,
         onjn_reports: true,
         legal_documents: true,
+        metrology: true,
+        jackpots: true,
         users: true
       },
       actions: {
@@ -1419,6 +2793,8 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
         invoices: { create: true, read: true, update: true, delete: true },
         onjn_reports: { create: true, read: true, update: true, delete: true },
         legal_documents: { create: true, read: true, update: true, delete: true },
+        metrology: { create: true, read: true, update: true, delete: true },
+        jackpots: { create: true, read: true, update: true, delete: true },
         users: { create: true, read: true, update: true, delete: true }
       },
       accessible_companies: user?.permissions?.accessible_companies || [],
@@ -1508,6 +2884,56 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
     }));
   };
 
+  // Select All functions
+  const handleSelectAllModules = (checked) => {
+    setFormData(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        modules: modules.reduce((acc, module) => {
+          acc[module.key] = checked;
+          return acc;
+        }, {})
+      }
+    }));
+  };
+
+  const handleSelectAllActions = (checked) => {
+    setFormData(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        actions: modules.filter(m => m.key !== 'dashboard').reduce((acc, module) => {
+          acc[module.key] = actions.reduce((actionAcc, action) => {
+            actionAcc[action.key] = checked;
+            return actionAcc;
+          }, {});
+          return acc;
+        }, {})
+      }
+    }));
+  };
+
+  const handleSelectAllCompanies = (checked) => {
+    setFormData(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        accessible_companies: checked ? companies.map(c => c.id) : []
+      }
+    }));
+  };
+
+  const handleSelectAllLocations = (checked) => {
+    setFormData(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        accessible_locations: checked ? locations.map(l => l.id) : []
+      }
+    }));
+  };
+
   const modules = [
     { key: 'dashboard', label: 'Dashboard', icon: '📊' },
     { key: 'companies', label: 'Companies', icon: '🏢' },
@@ -1553,7 +2979,7 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
                 />
               </div>
               <div className="form-group">
-                <label>Email</label>
+                <label>📧 Email</label>
                 <input
                   type="email"
                   value={formData.email}
@@ -1630,6 +3056,16 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
           {/* Module Access */}
           <div className="form-section">
             <h3>Module Access</h3>
+            <div className="select-all-row">
+              <label className="checkbox-label select-all-label">
+                <input
+                  type="checkbox"
+                  checked={modules.every(module => formData.permissions.modules[module.key])}
+                  onChange={(e) => handleSelectAllModules(e.target.checked)}
+                />
+                <span style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>Select All Modules</span>
+              </label>
+            </div>
             <div className="permissions-grid">
               {modules.map(module => (
                 <div key={module.key} className="permission-item">
@@ -1650,6 +3086,18 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
           {/* Action Permissions */}
           <div className="form-section">
             <h3>Action Permissions</h3>
+            <div className="select-all-row">
+              <label className="checkbox-label select-all-label">
+                <input
+                  type="checkbox"
+                  checked={modules.filter(m => m.key !== 'dashboard').every(module => 
+                    actions.every(action => formData.permissions.actions[module.key]?.[action.key])
+                  )}
+                  onChange={(e) => handleSelectAllActions(e.target.checked)}
+                />
+                <span style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>Select All Actions</span>
+              </label>
+            </div>
             <div className="actions-table">
               <div className="actions-header">
                 <div className="module-col">Module</div>
@@ -1684,6 +3132,16 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
           {/* Company Access */}
           <div className="form-section">
             <h3>Company Access</h3>
+            <div className="select-all-row">
+              <label className="checkbox-label select-all-label">
+                <input
+                  type="checkbox"
+                  checked={companies.every(company => formData.permissions.accessible_companies.includes(company.id))}
+                  onChange={(e) => handleSelectAllCompanies(e.target.checked)}
+                />
+                <span style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>Select All Companies</span>
+              </label>
+            </div>
             <div className="access-grid">
               {companies.map(company => (
                 <div key={company.id} className="access-item">
@@ -1703,6 +3161,16 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
           {/* Location Access */}
           <div className="form-section">
             <h3>Location Access</h3>
+            <div className="select-all-row">
+              <label className="checkbox-label select-all-label">
+                <input
+                  type="checkbox"
+                  checked={locations.every(location => formData.permissions.accessible_locations.includes(location.id))}
+                  onChange={(e) => handleSelectAllLocations(e.target.checked)}
+                />
+                <span style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>Select All Locations</span>
+              </label>
+            </div>
             <div className="access-grid">
               {locations.map(location => (
                 <div key={location.id} className="access-item">
@@ -1746,6 +3214,8 @@ const Dashboard = () => {
   const [invoices, setInvoices] = useState([]);
   const [onjnReports, setOnjnReports] = useState([]);
   const [legalDocuments, setLegalDocuments] = useState([]);
+  const [metrology, setMetrology] = useState([]);
+  const [jackpots, setJackpots] = useState([]);
   const [users, setUsers] = useState([]);
   const [editingUser, setEditingUser] = useState(null);
   const [showUserForm, setShowUserForm] = useState(false);
@@ -1758,12 +3228,50 @@ const Dashboard = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [entityType, setEntityType] = useState('');
   const [companiesLocations, setCompaniesLocations] = useState({ companies: [], locations: [] });
-  const [activeView, setActiveView] = useState('dashboard');
+  const [activeView, setActiveView] = useState(() => {
+    const savedView = localStorage.getItem('activeView');
+    return savedView || 'dashboard';
+  });
   const [loading, setLoading] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
+  // Initialize theme from localStorage or default to 'light'
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('theme');
+    return savedTheme || 'light';
+  });
+
+  // Click-to-filter states for slot machines table
+  const [selectedLocationFilter, setSelectedLocationFilter] = useState(null);
+  const [selectedProviderFilter, setSelectedProviderFilter] = useState(null);
+  const [selectedCabinetFilter, setSelectedCabinetFilter] = useState(null);
+  const [selectedGameMixFilter, setSelectedGameMixFilter] = useState(null);
+  const [selectedInvoiceFilter, setSelectedInvoiceFilter] = useState(null);
+  const [selectedContractFilter, setSelectedContractFilter] = useState(null);
+  const [selectedSerialFilter, setSelectedSerialFilter] = useState(null);
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState(null);
+  const [selectedRTPFilter, setSelectedRTPFilter] = useState(null);
+  const [selectedPlacesFilter, setSelectedPlacesFilter] = useState(null);
+  const [selectedCvtDateFilter, setSelectedCvtDateFilter] = useState(null);
+
+  // Provider avatar filter state
+  const [selectedProviderAvatarFilter, setSelectedProviderAvatarFilter] = useState(null);
+
+  // Invoice popup state
+  const [showInvoicePopup, setShowInvoicePopup] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [showAddCvtDatePopup, setShowAddCvtDatePopup] = useState(false);
 
   // User avatar hook
   const { avatar } = useAvatar('users', user?.id);
+
+  // Save theme preference to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Save active view to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('activeView', activeView);
+  }, [activeView]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -1774,7 +3282,7 @@ const Dashboard = () => {
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
       
-      const [statsRes, companiesRes, locationsRes, providersRes, cabinetsRes, slotMachinesRes, gameMixesRes, invoicesRes, onjnRes, legalRes, usersRes, adminDataRes] = await Promise.all([
+      const [statsRes, companiesRes, locationsRes, providersRes, cabinetsRes, slotMachinesRes, gameMixesRes, invoicesRes, onjnRes, legalRes, metrologyRes, jackpotsRes, usersRes, adminDataRes] = await Promise.all([
         fetch(`${API}/dashboard/stats`, { headers }),
         fetch(`${API}/companies`, { headers }),
         fetch(`${API}/locations`, { headers }),
@@ -1785,11 +3293,13 @@ const Dashboard = () => {
         fetch(`${API}/invoices`, { headers }),
         fetch(`${API}/onjn-reports`, { headers }),
         fetch(`${API}/legal-documents`, { headers }),
-        user?.role === 'admin' ? fetch(`${API}/users`, { headers }) : Promise.resolve({ json: () => [] }),
+        fetch(`${API}/metrology`, { headers }),
+        fetch(`${API}/jackpots`, { headers }),
+        fetch(`${API}/users`, { headers }),
         user?.role === 'admin' ? fetch(`${API}/admin/companies-locations`, { headers }) : Promise.resolve({ json: () => ({ companies: [], locations: [] }) })
       ]);
       
-      const [statsData, companiesData, locationsData, providersData, cabinetsData, slotMachinesData, gameMixesData, invoicesData, onjnData, legalData, usersData, adminData] = await Promise.all([
+      const [statsData, companiesData, locationsData, providersData, cabinetsData, slotMachinesData, gameMixesData, invoicesData, onjnData, legalData, metrologyData, jackpotsData, usersData, adminData] = await Promise.all([
         statsRes.json(),
         companiesRes.json(),
         locationsRes.json(),
@@ -1800,7 +3310,9 @@ const Dashboard = () => {
         invoicesRes.json(),
         onjnRes.json(),
         legalRes.json(),
-        usersRes.json ? usersRes.json() : [],
+        metrologyRes.json(),
+        jackpotsRes.json(),
+        usersRes.json(),
         adminDataRes.json ? adminDataRes.json() : { companies: [], locations: [] }
       ]);
       
@@ -1814,12 +3326,146 @@ const Dashboard = () => {
       setInvoices(invoicesData);
       setOnjnReports(onjnData);
       setLegalDocuments(legalData);
+      setMetrology(metrologyData);
+      setJackpots(jackpotsData);
+      
+                    // Metrology data loaded
+      console.log('📊 Metrology data loaded:', metrologyData);
       setUsers(usersData);
       setCompaniesLocations(adminData);
+      
+      // Store metrology data globally for handleMetrologyDateChange function
+      window.metrologyData = metrologyData;
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSlotStatusChange = async (slot, newStatus) => {
+    if (slot.status === newStatus) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Create a simple update object with only the necessary fields
+      const updateData = {
+        cabinet_id: slot.cabinet_id,
+        game_mix_id: slot.game_mix_id,
+        provider_id: slot.provider_id,
+        model: slot.model,
+        serial_number: slot.serial_number,
+        denomination: slot.denomination,
+        max_bet: slot.max_bet,
+        rtp: slot.rtp,
+        gaming_places: slot.gaming_places,
+        commission_date: slot.commission_date,
+        invoice_number: slot.invoice_number,
+        status: newStatus
+      };
+      
+      const response = await fetch(`${API}/slot-machines/${slot.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(updateData)
+      });
+      
+      if (response.ok) {
+        // Force refresh all data
+        await fetchDashboardData();
+        
+        // Show success message
+        const statusText = newStatus === 'active' ? 'activ' : 'inactiv';
+        alert(`✅ Status slot actualizat cu succes la: ${statusText}`);
+      } else {
+        const errorData = await response.json();
+        alert(`Eroare la actualizare: ${errorData.detail || 'Eroare necunoscută'}`);
+      }
+    } catch (error) {
+      alert('Eroare de conexiune: ' + error.message);
+    }
+  };
+
+  // Funcția handleMetrologyDateChange pentru editarea datelor CVT
+  const handleMetrologyDateChange = async (serialNumber, newDate) => {
+    const token = localStorage.getItem('token');
+    
+    console.log('🔍 handleMetrologyDateChange called:', { serialNumber, newDate });
+    
+    // Caută dacă există deja o intrare metrology pentru acest serial
+    const existing = metrology.find(m => m.serial_number === serialNumber);
+    
+    console.log('📋 Existing metrology record:', existing);
+    
+    try {
+      if (existing) {
+        // Update
+        const updateData = { 
+          ...existing, 
+          cvt_expiry_date: newDate,
+          certificate_number: existing.certificate_number || 'CVT-' + serialNumber,
+          certificate_type: existing.certificate_type || 'calibration',
+          issue_date: existing.issue_date || newDate,
+
+          issuing_authority: existing.issuing_authority || 'ANM',
+
+          description: existing.description || 'CVT Certificate'
+        };
+        
+        console.log('📤 Sending PUT request with data:', updateData);
+        
+        const response = await fetch(`${API}/metrology/${existing.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(updateData),
+        });
+        
+        console.log('📥 Response status:', response.status);
+        
+        if (response.ok) {
+          console.log('✅ Update successful');
+          await fetchDashboardData();
+        } else {
+          const errorText = await response.text();
+          console.error('❌ Error updating metrology record:', response.status, errorText);
+        }
+      } else {
+        // Create
+        const createData = { 
+          serial_number: serialNumber, 
+          cvt_expiry_date: newDate,
+          certificate_number: 'CVT-' + serialNumber,
+          certificate_type: 'calibration',
+          issue_date: newDate,
+
+          issuing_authority: 'ANM',
+          description: 'CVT Certificate'
+        };
+        
+        console.log('📤 Sending POST request with data:', createData);
+        
+        const response = await fetch(`${API}/metrology`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(createData),
+        });
+        
+        console.log('📥 Response status:', response.status);
+        
+        if (response.ok) {
+          console.log('✅ Create successful');
+          await fetchDashboardData();
+        } else {
+          const errorText = await response.text();
+          console.error('❌ Error creating metrology record:', response.status, errorText);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error in handleMetrologyDateChange:', error);
     }
   };
 
@@ -1831,7 +3477,11 @@ const Dashboard = () => {
     { id: 'providers', label: 'Providers', icon: '🎮', count: providers.length },
     { id: 'cabinets', label: 'Cabinets', icon: '🎰', count: cabinets.length },
     { id: 'gamemixes', label: 'Game Mixes', icon: '🎲', count: gameMixes.length },
-    { id: 'slots', label: 'Slots', icon: '🎯', count: slotMachines.length },
+    { id: 'slots', label: 'Slots', icon: '🎯', count: slotMachines.filter(s => s.status !== 'inactive').length },
+    { id: 'warehouse', label: 'Warehouse', icon: '📦', count: slotMachines.filter(s => s.status === 'inactive').length },
+    { id: 'metrology', label: 'Metrology', icon: '🔬', count: slotMachines.filter(s => s.status === 'active').length },
+    { id: 'metrology2', label: 'Metrology 2', icon: '🔧', count: metrology.length },
+    { id: 'jackpots', label: 'Jackpots', icon: '🎰', count: jackpots.length },
     { id: 'invoices', label: 'Invoices', icon: '💰', count: invoices.length },
     { id: 'onjn', label: 'ONJN Reports', icon: '📋', count: onjnReports.length },
     { id: 'legal', label: 'Legal Documents', icon: '📄', count: legalDocuments.length },
@@ -1899,10 +3549,45 @@ const Dashboard = () => {
 
   const handleSaveEntity = async (entityData) => {
     try {
+      // Debug: Log the data being saved for slots
+      if (entityType === 'slots') {
+        console.log('🎰 Saving slot machine data:', entityData);
+        console.log('🔍 Fields present:', Object.keys(entityData));
+        console.log('📋 Production year:', entityData.production_year);
+        console.log('📍 Location ID:', entityData.location_id);
+        console.log('🏠 Ownership type:', entityData.ownership_type);
+      }
+      
+      // Debug: Log the data being saved for locations
+      if (entityType === 'locations') {
+        console.log('📍 Saving location data:', entityData);
+        console.log('🔍 Fields present:', Object.keys(entityData));
+        console.log('👤 Contact person:', entityData.contact_person);
+        console.log('📧 Contact email:', entityData.contact_email);
+        console.log('📞 Contact phone:', entityData.contact_phone);
+        console.log('🆔 Contact person ID:', entityData.contact_person_id);
+        console.log('📝 Contact person type:', entityData.contact_person_type);
+      }
+      
+      // Debug: Log the data being saved for invoices
+      if (entityType === 'invoices') {
+        console.log('🧾 Saving invoice data:', entityData);
+        console.log('🔍 Fields present:', Object.keys(entityData));
+        console.log('📊 Status:', entityData.status);
+        console.log('💰 Amount:', entityData.amount);
+        console.log('📅 Issue date:', entityData.issue_date);
+        console.log('📅 Due date:', entityData.due_date);
+        console.log('🏢 Buyer ID:', entityData.buyer_id);
+        console.log('🏪 Seller ID:', entityData.seller_id);
+        console.log('📍 Location ID:', entityData.location_id);
+      }
+      
       const token = localStorage.getItem('token');
       const method = editingEntity ? 'PUT' : 'POST';
       const endpoint = getEntityEndpoint(entityType);
       const url = editingEntity ? `${API}/${endpoint}/${editingEntity.id}` : `${API}/${endpoint}`;
+      
+      console.log('🌐 API URL:', url);
       
       const response = await fetch(url, {
         method,
@@ -1913,13 +3598,18 @@ const Dashboard = () => {
         body: JSON.stringify(entityData)
       });
 
+      console.log('📡 Response status:', response.status);
+
       if (response.ok) {
+        const responseData = await response.json();
+        console.log('✅ Save successful, response data:', responseData);
         await fetchDashboardData(); // Refresh data
         handleCloseEntityForm();
         alert(`✅ ${getEntityDisplayName(entityType)} saved successfully!`);
       } else {
         const error = await response.json();
-        console.error('Failed to save entity:', error);
+        console.error('❌ Failed to save entity:', error);
+        console.error('📡 Response status:', response.status, response.statusText);
         alert(`❌ Failed to save ${getEntityDisplayName(entityType)}: ${error.detail || 'Unknown error'}`);
       }
     } catch (error) {
@@ -1968,7 +3658,9 @@ const Dashboard = () => {
       gamemixes: 'game-mixes',
       invoices: 'invoices',
       onjn: 'onjn-reports',
-      legal: 'legal-documents'
+      legal: 'legal-documents',
+      metrology: 'metrology',
+      jackpots: 'jackpots'
     };
     return endpoints[type] || type;
   };
@@ -2027,6 +3719,98 @@ const Dashboard = () => {
     }
   };
 
+  // Bulk Duplicate Handler for Slots
+  const handleBulkDuplicate = async (entityType) => {
+    console.log('🔄 BULK DUPLICATE CLICKED:', entityType);
+    console.log('🔄 Selected items:', selectedItems);
+    
+    if (selectedItems.length === 0) {
+      alert('❌ Please select items to duplicate first!');
+      return;
+    }
+
+    if (entityType !== 'slots') {
+      alert('❌ Duplication is only available for slots!');
+      return;
+    }
+
+    try {
+      console.log('🚀 Starting bulk duplicate...');
+      const token = localStorage.getItem('token');
+      
+      // Get all existing slot serial numbers to avoid conflicts
+      const existingSerials = slotMachines.map(slot => slot.serial_number);
+      console.log('📋 Existing serials:', existingSerials);
+      
+      let successCount = 0;
+      for (let i = 0; i < selectedItems.length; i++) {
+        const itemId = selectedItems[i];
+        console.log(`🔄 Duplicating ${itemId}...`);
+        
+        // Find the original slot
+        const originalSlot = slotMachines.find(slot => slot.id === itemId);
+        if (!originalSlot) {
+          console.error(`❌ Original slot not found: ${itemId}`);
+          continue;
+        }
+        
+        // Generate new serial number
+        const baseSerial = originalSlot.serial_number;
+        let newSerial = `${baseSerial}-1`;
+        let counter = 1;
+        
+        // Find next available serial number
+        while (existingSerials.includes(newSerial)) {
+          counter++;
+          newSerial = `${baseSerial}-${counter}`;
+        }
+        
+        // Add new serial to existing list to avoid conflicts in same batch
+        existingSerials.push(newSerial);
+        
+        // Create duplicate slot data
+        const duplicateData = {
+          ...originalSlot,
+          serial_number: newSerial,
+          status: 'active' // Set to active by default
+        };
+        
+        // Remove id and created_at to create new record
+        delete duplicateData.id;
+        delete duplicateData.created_at;
+        delete duplicateData.created_by;
+        
+        console.log('📤 Creating duplicate with data:', duplicateData);
+        
+        const response = await fetch(`${API}/slot-machines`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(duplicateData)
+        });
+        
+        if (response.ok) {
+          successCount++;
+          console.log(`✅ Duplicated ${originalSlot.serial_number} -> ${newSerial}`);
+        } else {
+          const errorText = await response.text();
+          console.error(`❌ Failed to duplicate ${originalSlot.serial_number}:`, errorText);
+        }
+      }
+
+      alert(`✅ Successfully duplicated ${successCount} of ${selectedItems.length} slots!`);
+      await fetchDashboardData();
+      setSelectedItems([]);
+      console.log('🔄 Data refreshed, selections cleared');
+      
+    } catch (error) {
+      console.error('💥 Bulk duplicate error:', error);
+      alert('❌ Bulk duplicate failed: ' + error.message);
+    }
+  };
+
   // Handle item selection for bulk edit
   const handleItemSelection = (itemId, checked) => {
     if (checked) {
@@ -2048,18 +3832,37 @@ const Dashboard = () => {
   // Bulk Edit Save Handler
   const handleBulkEditSave = async () => {
     try {
-      const updatePromises = selectedItems.map(async (itemId) => {
-        const endpoint = getEntityEndpoint(bulkEditType);
-        const response = await fetch(`${API}/${endpoint}/${itemId}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
-          body: JSON.stringify(bulkEditData)
+      let updatePromises;
+      
+      if (bulkEditType === 'metrology') {
+        // For metrology, selectedItems are metrology record IDs directly
+        updatePromises = selectedItems.map(async (metrologyId) => {
+          // Update the metrology record directly
+          const response = await fetch(`${API}/metrology/${metrologyId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(bulkEditData)
+          });
+          return response.ok;
         });
-        return response.ok;
-      });
+      } else {
+        // For other entity types, use the standard approach
+        updatePromises = selectedItems.map(async (itemId) => {
+          const endpoint = getEntityEndpoint(bulkEditType);
+          const response = await fetch(`${API}/${endpoint}/${itemId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: JSON.stringify(bulkEditData)
+          });
+          return response.ok;
+        });
+      }
 
       const results = await Promise.all(updatePromises);
       const successCount = results.filter(Boolean).length;
@@ -2231,20 +4034,150 @@ const Dashboard = () => {
       invoices: ['invoice_number', 'amount'],
       onjn: ['report_number'],
       legal: ['document_type', 'title'],
-      users: ['username', 'email', 'first_name', 'last_name', 'role']
+      users: ['username', 'email', 'first_name', 'last_name', 'role'],
+      metrology: ['serial_number', 'certificate_number', 'issue_date'],
+      jackpots: ['serial_number', 'jackpot_type', 'current_amount']
     };
     return fields[entityType] || ['name'];
   };
 
+  // Toggle functions for click-to-filter functionality
+  const toggleLocationFilter = (locationId) => {
+    setSelectedLocationFilter(selectedLocationFilter === locationId ? null : locationId);
+  };
+
+  const toggleProviderFilter = (providerId) => {
+    setSelectedProviderFilter(selectedProviderFilter === providerId ? null : providerId);
+  };
+
+  const toggleCabinetFilter = (cabinetId) => {
+    setSelectedCabinetFilter(selectedCabinetFilter === cabinetId ? null : cabinetId);
+  };
+
+  const toggleGameMixFilter = (gameMixId) => {
+    setSelectedGameMixFilter(selectedGameMixFilter === gameMixId ? null : gameMixId);
+  };
+
+  const toggleInvoiceFilter = (invoiceNumber) => {
+    setSelectedInvoiceFilter(selectedInvoiceFilter === invoiceNumber ? null : invoiceNumber);
+  };
+
+  const toggleContractFilter = (contractNumber) => {
+    setSelectedContractFilter(selectedContractFilter === contractNumber ? null : contractNumber);
+  };
+
+  const toggleSerialFilter = (serialNumber) => {
+    setSelectedSerialFilter(selectedSerialFilter === serialNumber ? null : serialNumber);
+  };
+
+  const toggleCompanyFilter = (companyId) => {
+    setSelectedCompanyFilter(selectedCompanyFilter === companyId ? null : companyId);
+  };
+
+  const toggleRTPFilter = (rtp) => {
+    setSelectedRTPFilter(selectedRTPFilter === rtp ? null : rtp);
+  };
+
+  const togglePlacesFilter = (places) => {
+    setSelectedPlacesFilter(selectedPlacesFilter === places ? null : places);
+  };
+
+  // Toggle function for CVT date filter
+  const toggleCvtDateFilter = (cvtDate) => {
+    setSelectedCvtDateFilter(selectedCvtDateFilter === cvtDate ? null : cvtDate);
+  };
+
+  // Toggle function for provider avatar filter
+  const toggleProviderAvatarFilter = (providerId) => {
+    setSelectedProviderAvatarFilter(selectedProviderAvatarFilter === providerId ? null : providerId);
+  };
+
+  const handleInvoiceClick = (invoice) => {
+    setSelectedInvoice(invoice);
+    setShowInvoicePopup(true);
+  };
+
+  const handleCloseInvoicePopup = () => {
+    setShowInvoicePopup(false);
+    setSelectedInvoice(null);
+  };
+
+  // Add CVT Date popup handlers
+  const handleOpenAddCvtDatePopup = () => {
+    setShowAddCvtDatePopup(true);
+  };
+
+  const handleCloseAddCvtDatePopup = () => {
+    setShowAddCvtDatePopup(false);
+  };
+
   const renderTable = (title, data, columns, actions, entityType) => {
     // Apply search filter
-    const filteredData = filterData(data, searchTerm);
+    let filteredData = filterData(data, searchTerm);
+    
+    // Apply click-to-filter for slot machines
+    if (entityType === 'slots') {
+      // Apply provider avatar filter FIRST
+      if (selectedProviderAvatarFilter) {
+        filteredData = filteredData.filter(slot => slot.provider_id === selectedProviderAvatarFilter);
+      }
+      if (selectedLocationFilter) {
+        filteredData = filteredData.filter(slot => slot.location_id === selectedLocationFilter);
+      }
+      if (selectedProviderFilter) {
+        filteredData = filteredData.filter(slot => slot.provider_id === selectedProviderFilter);
+      }
+      if (selectedCabinetFilter) {
+        filteredData = filteredData.filter(slot => slot.cabinet_id === selectedCabinetFilter);
+      }
+      if (selectedGameMixFilter) {
+        filteredData = filteredData.filter(slot => slot.game_mix_id === selectedGameMixFilter);
+      }
+      if (selectedInvoiceFilter) {
+        filteredData = filteredData.filter(slot => slot.invoice_number === selectedInvoiceFilter);
+      }
+      if (selectedContractFilter) {
+        filteredData = filteredData.filter(slot => slot.lease_contract_number === selectedContractFilter);
+      }
+      if (selectedSerialFilter) {
+        filteredData = filteredData.filter(slot => slot.serial_number === selectedSerialFilter);
+      }
+      if (selectedCompanyFilter) {
+        filteredData = filteredData.filter(slot => slot.owner_company_id === selectedCompanyFilter);
+      }
+      if (selectedRTPFilter) {
+        filteredData = filteredData.filter(slot => slot.rtp === selectedRTPFilter);
+      }
+      if (selectedPlacesFilter) {
+        filteredData = filteredData.filter(slot => slot.gaming_places === selectedPlacesFilter);
+      }
+      if (selectedCvtDateFilter) {
+        filteredData = filteredData.filter(slot => {
+          // Find metrology record for this slot
+          const metrologyItem = metrology.find(m => {
+            if (!m.serial_number) return false;
+            
+            // Try both newline and space separation
+            const serialNumbersNewline = m.serial_number.split('\n').filter(s => s.trim());
+            const serialNumbersSpace = m.serial_number.split(' ').filter(s => s.trim());
+            
+            // Use the one that has more items (more likely to be correct)
+            const serialNumbers = serialNumbersNewline.length > serialNumbersSpace.length ? 
+              serialNumbersNewline : serialNumbersSpace;
+            
+            return serialNumbers.includes(slot.serial_number);
+          });
+          
+          return metrologyItem?.cvt_expiry_date === selectedCvtDateFilter;
+        });
+      }
+    }
     
     return (
       <div className="table-container">
         <div className="table-header">
           <h2>{title}</h2>
-          <div className="table-controls">
+          <div className="table-actions">
             <div className="search-container">
               <input
                 type="text"
@@ -2255,49 +4188,127 @@ const Dashboard = () => {
               />
               <span className="search-icon">🔍</span>
             </div>
-            <div className="table-actions">
+            <button 
+              className="btn-primary"
+              onClick={() => actions?.onAdd && actions.onAdd()}
+            >
+              <span className="icon">➕</span>
+              Add {entityType === 'slots' ? 'Slot' : entityType === 'metrology' ? 'Metrologie' : title.slice(0, -1)}
+            </button>
+            <button 
+              className="btn-secondary"
+              onClick={() => actions?.onBulkEdit && actions.onBulkEdit()}
+              title="Bulk Edit Selected"
+            >
+              <span className="icon">📝</span>
+              Bulk Edit ({selectedItems.length})
+            </button>
+            <button 
+              className="btn-danger"
+              onClick={() => actions?.onBulkDelete && actions.onBulkDelete()}
+              title="Bulk Delete Selected"
+            >
+              <span className="icon">🗑️</span>
+              Bulk Delete ({selectedItems.length})
+            </button>
+            {entityType === 'slots' && (
               <button 
-                className="btn-primary"
-                onClick={() => actions?.onAdd && actions.onAdd()}
+                className="btn-warning"
+                onClick={() => actions?.onBulkDuplicate && actions.onBulkDuplicate()}
+                title="Duplicate Selected Slots"
               >
-                <span className="icon">➕</span>
-                Add {title.slice(0, -1)}
+                <span className="icon">🔄</span>
+                Duplicate ({selectedItems.length})
               </button>
-              <button 
-                className="btn-secondary"
-                onClick={() => actions?.onBulkEdit && actions.onBulkEdit()}
-                title="Bulk Edit Selected"
-              >
-                <span className="icon">📝</span>
-                Bulk Edit ({selectedItems.length})
-              </button>
-              <button 
-                className="btn-danger"
-                onClick={() => actions?.onBulkDelete && actions.onBulkDelete()}
-                title="Bulk Delete Selected"
-              >
-                <span className="icon">🗑️</span>
-                Bulk Delete ({selectedItems.length})
-              </button>
-              <button 
-                className="btn-success"
-                onClick={() => actions?.onExport && actions.onExport()}
-                title="Export Data"
-              >
-                <span className="icon">📤</span>
-                Export
-              </button>
-              <button 
-                className="btn-info"
-                onClick={() => actions?.onImport && actions.onImport()}
-                title="Import Data"
-              >
-                <span className="icon">📥</span>
-                Import
-              </button>
-            </div>
+            )}
+            <button 
+              className="btn-success"
+              onClick={() => actions?.onExport && actions.onExport()}
+              title="Export Data"
+            >
+              <span className="icon">📤</span>
+              Export
+            </button>
+            <button 
+              className="btn-info"
+              onClick={() => actions?.onImport && actions.onImport()}
+              title="Import Data"
+            >
+              <span className="icon">📥</span>
+              Import
+            </button>
           </div>
         </div>
+        {/* Provider filter avatars for Slot Machines - SECOND ROW */}
+        {entityType === 'slots' && (
+          <div className="provider-avatars-filter" style={{margin: '8px 0 0 0'}}>
+            {providers.map(provider => (
+              <div
+                key={provider.id}
+                className={`provider-avatar-filter ${selectedProviderAvatarFilter === provider.id ? 'active' : ''}`}
+                onClick={() => toggleProviderAvatarFilter(provider.id)}
+                title={`Filter by ${provider.name}`}
+              >
+                <AvatarDisplay entityType="providers" entityId={provider.id} size={50} />
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Active Filters Display for Slot Machines */}
+        {entityType === 'slots' && (selectedProviderAvatarFilter || selectedLocationFilter || selectedProviderFilter || selectedCabinetFilter || selectedGameMixFilter || selectedInvoiceFilter || selectedContractFilter) && (
+          <div className="active-filters-info">
+            <strong>Active Filters:</strong>
+            {selectedProviderAvatarFilter && (
+              <span className="filter-tag">
+                👤 Provider: {providers.find(p => p.id === selectedProviderAvatarFilter)?.name || 'Unknown'}
+                <button onClick={() => setSelectedProviderAvatarFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedLocationFilter && (
+              <span className="filter-tag">
+                📍 Location: {locations.find(l => l.id === selectedLocationFilter)?.name || 'Unknown'}
+                <button onClick={() => setSelectedLocationFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedProviderFilter && (
+              <span className="filter-tag">
+                🏢 Provider: {providers.find(p => p.id === selectedProviderFilter)?.name || 'Unknown'}
+                <button onClick={() => setSelectedProviderFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedCabinetFilter && (
+              <span className="filter-tag">
+                🏛️ Cabinet: {cabinets.find(c => c.id === selectedCabinetFilter)?.name || 'Unknown'}
+                <button onClick={() => setSelectedCabinetFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedGameMixFilter && (
+              <span className="filter-tag">
+                🎮 Game Mix: {gameMixes.find(gm => gm.id === selectedGameMixFilter)?.name || 'Unknown'}
+                <button onClick={() => setSelectedGameMixFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedInvoiceFilter && (
+              <span className="filter-tag">
+                📄 Invoice: {selectedInvoiceFilter}
+                <button onClick={() => setSelectedInvoiceFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedContractFilter && (
+              <span className="filter-tag">
+                📋 Contract: {selectedContractFilter}
+                <button onClick={() => setSelectedContractFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+            {selectedCvtDateFilter && (
+              <span className="filter-tag">
+                📅 CVT Date: {new Date(selectedCvtDateFilter).toLocaleDateString()}
+                <button onClick={() => setSelectedCvtDateFilter(null)} className="filter-remove">×</button>
+              </span>
+            )}
+        </div>
+        )}
         <div className="table-content">
           {filteredData.length < data.length && (
             <div className="search-results-info">
@@ -2351,27 +4362,100 @@ const Dashboard = () => {
                       </td>
                     ))}
                     <td>
+                      {entityType === 'slots' || entityType === 'metrology' ? (
+                        <div className="table-row-actions-vertical">
+                          {/* First row: Edit, Delete, and Attach buttons */}
+                          <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                            <button 
+                              className="btn-edit"
+                              onClick={() => actions?.onEdit && actions.onEdit(item)}
+                              title="Edit"
+                              style={{ fontSize: '14px', padding: '2px 4px' }}
+                            >
+                              📝
+                            </button>
+                            <button 
+                              className="btn-delete"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeleteEntity(item.id, entityType);
+                              }}
+                              title="Delete"
+                              style={{ fontSize: '14px', padding: '2px 4px' }}
+                            >
+                              🗑️
+                            </button>
+                            <span style={{fontSize:'1.1em',cursor:'pointer'}} title="Atașamente">
+                              📎
+                            </span>
+                          </div>
+                          {/* Second row: Status toggle (only for slots and warehouse) */}
+                          {(entityType === 'slots' || entityType === 'warehouse') && (
+                            <div style={{ textAlign: 'center' }}>
+                              <label className="switch" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={item.status === 'active'}
+                                  onChange={e => handleSlotStatusChange(item, e.target.checked ? 'active' : 'inactive')}
+                                  style={{ display: 'none' }}
+                                />
+                                <span style={{
+                                  width: 36,
+                                  height: 20,
+                                  background: item.status === 'active' ? 'var(--accent-color)' : '#ccc',
+                                  borderRadius: 12,
+                                  position: 'relative',
+                                  transition: 'background 0.2s',
+                                  display: 'inline-block',
+                                  marginRight: 6
+                                }}>
+                                  <span style={{
+                                    position: 'absolute',
+                                    left: item.status === 'active' ? 18 : 2,
+                                    top: 2,
+                                    width: 16,
+                                    height: 16,
+                                    background: '#fff',
+                                    borderRadius: '50%',
+                                    boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+                                    transition: 'left 0.2s'
+                                  }} />
+                                </span>
+                                <span style={{ fontSize: 14, color: item.status === 'active' ? 'var(--accent-color)' : '#888', fontWeight: 600 }}>
+                                  {item.status === 'active' ? '🟢' : '🔴'}
+                                </span>
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
                       <div className="table-row-actions">
                         <button 
                           className="btn-edit"
                           onClick={() => actions?.onEdit && actions.onEdit(item)}
                           title="Edit"
+                            style={{ fontSize: '14px', padding: '2px 4px' }}
                         >
-                          📝 Edit
+                            📝
                         </button>
                         <button 
                           className="btn-delete"
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('🔥 DIRECT DELETE HANDLER!', item.id, entityType);
                             handleDeleteEntity(item.id, entityType);
                           }}
                           title="Delete"
+                            style={{ fontSize: '14px', padding: '2px 4px' }}
                         >
-                          🗑️ Delete
+                            🗑️
                         </button>
+                          <span style={{fontSize:'1.1em',cursor:'pointer'}} title="Atașamente">
+                            📎
+                          </span>
                       </div>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -2392,63 +4476,63 @@ const Dashboard = () => {
       
       {stats && (
         <div className="stats-grid">
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('companies')}>
             <div className="stat-icon" style={{ backgroundColor: '#3b82f6' }}>📊</div>
             <div className="stat-content">
               <h3>Total Companies</h3>
               <p className="stat-value">{stats.total_companies}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('locations')}>
             <div className="stat-icon" style={{ backgroundColor: '#10b981' }}>📍</div>
             <div className="stat-content">
               <h3>Total Locations</h3>
               <p className="stat-value">{stats.total_locations}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('providers')}>
             <div className="stat-icon" style={{ backgroundColor: '#f59e0b' }}>🎮</div>
             <div className="stat-content">
               <h3>Gaming Providers</h3>
               <p className="stat-value">{stats.total_providers}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('cabinets')}>
             <div className="stat-icon" style={{ backgroundColor: '#ef4444' }}>🎰</div>
             <div className="stat-content">
               <h3>Gaming Cabinets</h3>
               <p className="stat-value">{stats.total_cabinets}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('slots')}>
             <div className="stat-icon" style={{ backgroundColor: '#8b5cf6' }}>🎯</div>
             <div className="stat-content">
               <h3>Slot Machines</h3>
               <p className="stat-value">{stats.total_slot_machines}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('dashboard')}>
             <div className="stat-icon" style={{ backgroundColor: '#06b6d4' }}>⚡</div>
             <div className="stat-content">
               <h3>Active Equipment</h3>
               <p className="stat-value">{stats.active_equipment}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('invoices')}>
             <div className="stat-icon" style={{ backgroundColor: '#f59e0b' }}>💰</div>
             <div className="stat-content">
               <h3>Invoices</h3>
               <p className="stat-value">{stats.total_invoices}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('onjn')}>
             <div className="stat-icon" style={{ backgroundColor: '#10b981' }}>📋</div>
             <div className="stat-content">
               <h3>ONJN Reports</h3>
               <p className="stat-value">{stats.total_onjn_reports}</p>
             </div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card clickable" onClick={() => setActiveView('legal')}>
             <div className="stat-icon" style={{ backgroundColor: '#ef4444' }}>📄</div>
             <div className="stat-content">
               <h3>Legal Documents</h3>
@@ -2456,7 +4540,7 @@ const Dashboard = () => {
             </div>
           </div>
           {user?.role === 'admin' && (
-            <div className="stat-card">
+            <div className="stat-card clickable" onClick={() => setActiveView('users')}>
               <div className="stat-icon" style={{ backgroundColor: '#8b5cf6' }}>👥</div>
               <div className="stat-content">
                 <h3>Total Users</h3>
@@ -2491,7 +4575,1429 @@ const Dashboard = () => {
     </div>
   );
 
+  // Invoice Popup Component
+  const InvoicePopup = ({ invoice, onClose }) => {
+    if (!invoice) return null;
+
+    // Find location, buyer and seller based on invoice data
+    const location = locations.find(location => location.id === invoice.location_id);
+    const buyer = companies.find(company => company.id === invoice.buyer_id);
+    const seller = providers.find(provider => provider.id === invoice.seller_id);
+
+    // Format amount in Romanian format (15.00,68)
+    const formatAmount = (amount) => {
+      if (!amount) return '0,00';
+      const num = parseFloat(amount);
+      if (isNaN(num)) return '0,00';
+      
+      // Convert to string with 2 decimal places
+      const formatted = num.toFixed(2);
+      // Split by decimal point
+      const parts = formatted.split('.');
+      // Add thousands separator (.) and replace decimal point with comma
+      const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      return `${integerPart},${parts[1]}`;
+    };
+
+    // Remove euro symbol from Denomin and Maxbet
+    const cleanDescription = (description) => {
+      if (!description) return 'No description';
+      return description
+        .replace(/€/g, '') // Remove euro symbol
+        .replace(/EUR/g, '') // Remove EUR text
+        .replace(/\s+/g, ' ') // Remove extra spaces
+        .trim();
+    };
+
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-content invoice-popup" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>Invoice Details - {invoice.invoice_number}</h2>
+            <button className="modal-close" onClick={onClose}>×</button>
+          </div>
+          <div className="invoice-details">
+            <div className="invoice-grid">
+              <div className="invoice-field">
+                <label>Invoice Number:</label>
+                <span>{invoice.invoice_number}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Issue Date:</label>
+                <span>{new Date(invoice.issue_date).toLocaleDateString()}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Due Date:</label>
+                <span>{new Date(invoice.due_date).toLocaleDateString()}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Amount:</label>
+                <span>{formatAmount(invoice.amount)} {invoice.currency || 'EUR'}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Description:</label>
+                <span>{cleanDescription(invoice.description)}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Status:</label>
+                <span className={`status-badge ${invoice.status || 'pending'}`}>
+                  {invoice.status || 'Pending'}
+                </span>
+              </div>
+              <div className="invoice-field">
+                <label>Serial Numbers:</label>
+                <span>{invoice.serial_numbers || 'N/A'}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Location:</label>
+                <span>{location ? location.name : 'N/A'}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Buyer:</label>
+                <span>{buyer ? buyer.name : 'N/A'}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Seller:</label>
+                <span>{seller ? seller.name : 'N/A'}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Contact Person:</label>
+                <span>{buyer ? buyer.contact_person : 'N/A'}</span>
+              </div>
+              <div className="invoice-field">
+                <label>Email:</label>
+                <span>
+                  <span style={{ marginRight: '8px', fontSize: '16px' }}>📧</span>
+                  {buyer ? buyer.email : 'N/A'}
+                </span>
+              </div>
+              <div className="invoice-field">
+                <label>Phone:</label>
+                <span>
+                  <span style={{ marginRight: '8px', fontSize: '16px' }}>📞</span>
+                  {buyer ? buyer.phone : 'N/A'}
+                </span>
+              </div>
+              <div className="invoice-field">
+                <label>Created At:</label>
+                <span>{new Date(invoice.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Add CVT Date Popup Component
+  const AddCvtDatePopup = ({ onClose }) => {
+    const [formData, setFormData] = useState({
+      serial_numbers: '',
+      cvt_date: '',
+      cvt_end_date: '',
+      cvt_type: 'periodic',
+      provider_filter: '',
+      cabinet_filter: '',
+      game_mix_filter: '',
+      license_date_filter: '',
+      search_term: ''
+    });
+
+    const [filteredSlots, setFilteredSlots] = useState([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [validationErrors, setValidationErrors] = useState({});
+
+    const handleChange = (field, value) => {
+      setFormData(prev => ({
+        ...prev,
+        [field]: value
+      }));
+      
+      // Clear validation error when user starts typing
+      if (validationErrors[field]) {
+        setValidationErrors(prev => ({
+          ...prev,
+          [field]: null
+        }));
+      }
+    };
+
+    const validateForm = () => {
+      const errors = {};
+      const serialNumbers = formData.serial_numbers.split(' ').filter(sn => sn.trim());
+      
+      if (!formData.serial_numbers.trim()) {
+        errors.serial_numbers = 'Serial numbers are required';
+      } else if (serialNumbers.length === 0) {
+        errors.serial_numbers = 'Please enter at least one valid serial number';
+      }
+      
+      if (!formData.cvt_date) {
+        errors.cvt_date = 'CVT date is required';
+      }
+      
+      if (!formData.cvt_end_date) {
+        errors.cvt_end_date = 'CVT end date is required';
+      } else if (formData.cvt_date && formData.cvt_end_date && formData.cvt_end_date <= formData.cvt_date) {
+        errors.cvt_end_date = 'End date must be after start date';
+      }
+      
+      setValidationErrors(errors);
+      return Object.keys(errors).length === 0;
+    };
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      
+      if (!validateForm()) {
+        return;
+      }
+      
+      setIsSubmitting(true);
+      
+      try {
+        const token = localStorage.getItem('token');
+        const serialNumbers = formData.serial_numbers.split(' ').filter(sn => sn.trim());
+        
+        // Create metrology records for each serial number
+        const promises = serialNumbers.map(async (serialNumber) => {
+          const metrologyData = {
+            serial_number: serialNumber.trim(),
+            certificate_number: `CVT-${serialNumber}-${new Date().getFullYear()}`,
+            certificate_type: 'calibration',
+            issue_date: formData.cvt_date,
+
+            issuing_authority: 'ANM',
+            cvt_expiry_date: formData.cvt_end_date,
+            cvt_type: formData.cvt_type,
+            status: 'active',
+            description: `CVT ${formData.cvt_type} certificate for ${serialNumber}`
+          };
+
+          const response = await fetch(`${API}/metrology`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(metrologyData)
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to create CVT for ${serialNumber}`);
+          }
+
+          return response.json();
+        });
+
+        await Promise.all(promises);
+        alert(`✅ Successfully created CVT records for ${serialNumbers.length} slot(s)!`);
+        onClose();
+        fetchDashboardData(); // Refresh data
+      } catch (error) {
+        console.error('Error creating CVT records:', error);
+        alert(`❌ Error creating CVT records: ${error.message}`);
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    // Filter slots based on search criteria
+    useEffect(() => {
+      let filtered = slotMachines.filter(slot => slot.status === 'active');
+      
+      if (formData.provider_filter) {
+        filtered = filtered.filter(slot => slot.provider_id === formData.provider_filter);
+      }
+      
+      if (formData.cabinet_filter) {
+        filtered = filtered.filter(slot => slot.cabinet_id === formData.cabinet_filter);
+      }
+      
+      if (formData.game_mix_filter) {
+        filtered = filtered.filter(slot => slot.game_mix_id === formData.game_mix_filter);
+      }
+      
+      if (formData.license_date_filter) {
+        filtered = filtered.filter(slot => slot.commission_date === formData.license_date_filter);
+      }
+      
+      if (formData.search_term) {
+        const searchLower = formData.search_term.toLowerCase();
+        filtered = filtered.filter(slot => 
+          slot.serial_number.toLowerCase().includes(searchLower)
+        );
+      }
+      
+      setFilteredSlots(filtered);
+    }, [formData, slotMachines]);
+
+    const selectedSerials = formData.serial_numbers.split(' ').filter(sn => sn.trim());
+
+    return (
+      <div className="modal-overlay">
+        <div className="modal-content" style={{ 
+          maxWidth: '1000px', 
+          width: '95vw',
+          maxHeight: '90vh', 
+          overflow: 'auto',
+          background: 'var(--bg-secondary)',
+          borderRadius: '16px',
+          boxShadow: '0 25px 50px rgba(0,0,0,0.4)',
+          border: '1px solid var(--border-color)'
+        }}>
+          <div className="modal-header" style={{
+            background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--accent-color) 100%)',
+            borderBottom: '2px solid var(--border-color)',
+            padding: '24px 32px',
+            borderRadius: '16px 16px 0 0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <h2 style={{ 
+              margin: 0, 
+              color: 'var(--text-primary)', 
+              fontSize: '1.8rem',
+              fontWeight: 'bold',
+              textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+            }}>
+              🔧 CVT Metrology Administration
+            </h2>
+            <button 
+              className="modal-close" 
+              onClick={onClose}
+              style={{
+                background: 'rgba(255,255,255,0.1)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                fontSize: '1.8rem',
+                cursor: 'pointer',
+                color: 'var(--text-primary)',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                transition: 'all 0.3s ease',
+                backdropFilter: 'blur(10px)'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.background = 'rgba(255,255,255,0.2)';
+                e.target.style.transform = 'scale(1.1)';
+              }}
+              onMouseOut={(e) => {
+                e.target.style.background = 'rgba(255,255,255,0.1)';
+                e.target.style.transform = 'scale(1)';
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="modal-form" style={{ padding: '32px' }}>
+            {/* Quick Actions */}
+            <div style={{ 
+              background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)', 
+              padding: '24px', 
+              borderRadius: '12px', 
+              marginBottom: '24px',
+              border: '2px solid var(--border-color)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 16px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '1.3rem',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                ⚡ Quick Actions
+              </h3>
+              <div style={{ 
+                display: 'flex', 
+                gap: '16px', 
+                flexWrap: 'wrap',
+                alignItems: 'center'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSerials = filteredSlots.map(slot => slot.serial_number).join(' ');
+                    handleChange('serial_numbers', allSerials);
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, var(--accent-color) 0%, #0056b3 100%)',
+                    color: 'white',
+                    border: 'none',
+                    padding: '12px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: 'bold',
+                    transition: 'all 0.3s ease',
+                    boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 6px 12px rgba(0,0,0,0.3)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+                  }}
+                >
+                  📋 Select All ({filteredSlots.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleChange('serial_numbers', '')}
+                  style={{
+                    background: 'linear-gradient(135deg, var(--danger-color) 0%, #c53030 100%)',
+                    color: 'white',
+                    border: 'none',
+                    padding: '12px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: 'bold',
+                    transition: 'all 0.3s ease',
+                    boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 6px 12px rgba(0,0,0,0.3)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+                  }}
+                >
+                  🗑️ Clear All
+                </button>
+                <div style={{ 
+                  background: 'var(--bg-secondary)',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '1.2rem' }}>🎯</span>
+                  <span style={{ 
+                    color: 'var(--text-primary)', 
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    Selected: <span style={{ color: 'var(--accent-color)' }}>{selectedSerials.length}</span> slot(s)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filters Section */}
+            <div style={{ 
+              background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)', 
+              padding: '24px', 
+              borderRadius: '12px', 
+              marginBottom: '24px',
+              border: '2px solid var(--border-color)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '1.3rem',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                🔍 Advanced Filters
+              </h3>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
+                gap: '20px' 
+              }}>
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    🏢 Provider
+                  </label>
+                  <select
+                    value={formData.provider_filter}
+                    onChange={(e) => handleChange('provider_filter', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '14px 16px',
+                      border: '2px solid var(--border-color)',
+                      borderRadius: '8px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem',
+                      transition: 'all 0.3s ease',
+                      cursor: 'pointer'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = 'var(--accent-color)';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = 'var(--border-color)';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  >
+                    <option value="">🌐 All Providers</option>
+                    {providers.map(provider => (
+                      <option key={provider.id} value={provider.id}>🏢 {provider.name}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    🎰 Cabinet
+                  </label>
+                  <select
+                    value={formData.cabinet_filter}
+                    onChange={(e) => handleChange('cabinet_filter', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '14px 16px',
+                      border: '2px solid var(--border-color)',
+                      borderRadius: '8px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem',
+                      transition: 'all 0.3s ease',
+                      cursor: 'pointer'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = 'var(--accent-color)';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = 'var(--border-color)';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  >
+                    <option value="">🎰 All Cabinets</option>
+                    {cabinets.map(cabinet => (
+                      <option key={cabinet.id} value={cabinet.id}>🎰 {cabinet.name}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    🎮 Game Mix
+                  </label>
+                  <select
+                    value={formData.game_mix_filter}
+                    onChange={(e) => handleChange('game_mix_filter', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '14px 16px',
+                      border: '2px solid var(--border-color)',
+                      borderRadius: '8px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem',
+                      transition: 'all 0.3s ease',
+                      cursor: 'pointer'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = 'var(--accent-color)';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = 'var(--border-color)';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  >
+                    <option value="">🎮 All Game Mixes</option>
+                    {gameMixes.map(gameMix => (
+                      <option key={gameMix.id} value={gameMix.id}>🎮 {gameMix.name}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    📅 License Date
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.license_date_filter}
+                    onChange={(e) => handleChange('license_date_filter', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '14px 16px',
+                      border: '2px solid var(--border-color)',
+                      borderRadius: '8px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = 'var(--accent-color)';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = 'var(--border-color)';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  />
+                </div>
+              </div>
+              
+              <div className="form-group" style={{ marginTop: '20px' }}>
+                <label style={{ 
+                  color: 'var(--text-primary)', 
+                  marginBottom: '8px', 
+                  display: 'block',
+                  fontSize: '1rem',
+                  fontWeight: 'bold'
+                }}>
+                  🔍 Search Serial Numbers
+                </label>
+                <input
+                  type="text"
+                  value={formData.search_term}
+                  onChange={(e) => handleChange('search_term', e.target.value)}
+                  placeholder="🔍 Enter serial numbers to search..."
+                  style={{
+                    width: '100%',
+                    padding: '16px 20px',
+                    border: '2px solid var(--border-color)',
+                    borderRadius: '10px',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    fontSize: '1.1rem',
+                    transition: 'all 0.3s ease'
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = 'var(--accent-color)';
+                    e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                    e.target.style.transform = 'scale(1.02)';
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = 'var(--border-color)';
+                    e.target.style.boxShadow = 'none';
+                    e.target.style.transform = 'scale(1)';
+                  }}
+                />
+              </div>
+            </div>
+            
+            {/* CVT Information Section */}
+            <div style={{ 
+              background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)', 
+              padding: '24px', 
+              borderRadius: '12px', 
+              marginBottom: '24px',
+              border: '2px solid var(--border-color)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '1.3rem',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                📋 CVT Information
+              </h3>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
+                gap: '20px' 
+              }}>
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    🎰 Slot Serial Numbers *
+                  </label>
+                  <textarea
+                    value={formData.serial_numbers}
+                    onChange={(e) => handleChange('serial_numbers', e.target.value)}
+                    placeholder="🎰 Enter serial numbers separated by spaces (e.g., SN001 SN002 SN003)"
+                    rows="4"
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '16px 20px',
+                      border: validationErrors.serial_numbers ? '3px solid #ff4444' : '2px solid var(--border-color)',
+                      borderRadius: '10px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1.1rem',
+                      resize: 'vertical',
+                      transition: 'all 0.3s ease',
+                      fontFamily: 'monospace'
+                    }}
+                    onFocus={(e) => {
+                      if (!validationErrors.serial_numbers) {
+                        e.target.style.borderColor = 'var(--accent-color)';
+                        e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (!validationErrors.serial_numbers) {
+                        e.target.style.borderColor = 'var(--border-color)';
+                        e.target.style.boxShadow = 'none';
+                      }
+                    }}
+                  />
+                  {validationErrors.serial_numbers && (
+                    <div style={{ 
+                      color: '#ff4444', 
+                      fontSize: '0.9rem', 
+                      marginTop: '8px',
+                      padding: '8px 12px',
+                      background: 'rgba(255, 68, 68, 0.1)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 68, 68, 0.3)'
+                    }}>
+                      ⚠️ {validationErrors.serial_numbers}
+                    </div>
+                  )}
+                  <div style={{ 
+                    marginTop: '8px',
+                    padding: '8px 12px',
+                    background: 'var(--bg-primary)',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    <small style={{ 
+                      color: 'var(--text-secondary)', 
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold'
+                    }}>
+                      📊 Available slots: <span style={{ color: 'var(--accent-color)' }}>{filteredSlots.length}</span>
+                    </small>
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    📅 CVT Start Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.cvt_date}
+                    onChange={(e) => handleChange('cvt_date', e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '16px 20px',
+                      border: validationErrors.cvt_date ? '3px solid #ff4444' : '2px solid var(--border-color)',
+                      borderRadius: '10px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1.1rem',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onFocus={(e) => {
+                      if (!validationErrors.cvt_date) {
+                        e.target.style.borderColor = 'var(--accent-color)';
+                        e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (!validationErrors.cvt_date) {
+                        e.target.style.borderColor = 'var(--border-color)';
+                        e.target.style.boxShadow = 'none';
+                      }
+                    }}
+                  />
+                  {validationErrors.cvt_date && (
+                    <div style={{ 
+                      color: '#ff4444', 
+                      fontSize: '0.9rem', 
+                      marginTop: '8px',
+                      padding: '8px 12px',
+                      background: 'rgba(255, 68, 68, 0.1)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 68, 68, 0.3)'
+                    }}>
+                      ⚠️ {validationErrors.cvt_date}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    📅 CVT End Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.cvt_end_date}
+                    onChange={(e) => handleChange('cvt_end_date', e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '16px 20px',
+                      border: validationErrors.cvt_end_date ? '3px solid #ff4444' : '2px solid var(--border-color)',
+                      borderRadius: '10px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1.1rem',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onFocus={(e) => {
+                      if (!validationErrors.cvt_end_date) {
+                        e.target.style.borderColor = 'var(--accent-color)';
+                        e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (!validationErrors.cvt_end_date) {
+                        e.target.style.borderColor = 'var(--border-color)';
+                        e.target.style.boxShadow = 'none';
+                      }
+                    }}
+                  />
+                  {validationErrors.cvt_end_date && (
+                    <div style={{ 
+                      color: '#ff4444', 
+                      fontSize: '0.9rem', 
+                      marginTop: '8px',
+                      padding: '8px 12px',
+                      background: 'rgba(255, 68, 68, 0.1)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 68, 68, 0.3)'
+                    }}>
+                      ⚠️ {validationErrors.cvt_end_date}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="form-group">
+                  <label style={{ 
+                    color: 'var(--text-primary)', 
+                    marginBottom: '8px', 
+                    display: 'block',
+                    fontSize: '1rem',
+                    fontWeight: 'bold'
+                  }}>
+                    🔧 CVT Type *
+                  </label>
+                  <select
+                    value={formData.cvt_type}
+                    onChange={(e) => handleChange('cvt_type', e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '16px 20px',
+                      border: '2px solid var(--border-color)',
+                      borderRadius: '10px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '1.1rem',
+                      transition: 'all 0.3s ease',
+                      cursor: 'pointer'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = 'var(--accent-color)';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(0, 212, 255, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = 'var(--border-color)';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  >
+                    <option value="periodic">🔄 Periodic Verification</option>
+                    <option value="reparation">🔧 Reparation Verification</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            {/* Available Slots Section */}
+            <div style={{ 
+              background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)', 
+              padding: '24px', 
+              borderRadius: '12px', 
+              marginBottom: '24px',
+              border: '2px solid var(--border-color)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '1.3rem',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                🎰 Available Slots ({filteredSlots.length})
+              </h3>
+              <div style={{ 
+                maxHeight: '300px', 
+                overflow: 'auto', 
+                border: '2px solid var(--border-color)', 
+                padding: '20px',
+                borderRadius: '10px',
+                background: 'var(--bg-secondary)',
+                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+              }}>
+                {filteredSlots.length === 0 ? (
+                  <div style={{ 
+                    color: 'var(--text-secondary)', 
+                    fontStyle: 'italic',
+                    textAlign: 'center',
+                    padding: '40px 20px',
+                    background: 'var(--bg-primary)',
+                    borderRadius: '8px',
+                    border: '2px dashed var(--border-color)'
+                  }}>
+                    <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🔍</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '8px' }}>
+                      No slots match the current filters
+                    </div>
+                    <div style={{ fontSize: '1rem' }}>
+                      Try adjusting your search criteria
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', 
+                    gap: '12px' 
+                  }}>
+                    {filteredSlots.map(slot => (
+                      <div key={slot.id} 
+                        style={{ 
+                          padding: '12px 16px', 
+                          border: selectedSerials.includes(slot.serial_number) ? '3px solid var(--accent-color)' : '2px solid var(--border-color)', 
+                          borderRadius: '10px',
+                          fontSize: '1rem',
+                          cursor: 'pointer',
+                          backgroundColor: selectedSerials.includes(slot.serial_number) ? 'var(--accent-color)' : 'var(--bg-primary)',
+                          color: selectedSerials.includes(slot.serial_number) ? 'white' : 'var(--text-primary)',
+                          transition: 'all 0.3s ease',
+                          textAlign: 'center',
+                          fontWeight: selectedSerials.includes(slot.serial_number) ? 'bold' : 'normal',
+                          boxShadow: selectedSerials.includes(slot.serial_number) ? '0 4px 12px rgba(0, 212, 255, 0.3)' : '0 2px 4px rgba(0,0,0,0.1)',
+                          transform: selectedSerials.includes(slot.serial_number) ? 'scale(1.05)' : 'scale(1)'
+                        }}
+                        onClick={() => {
+                          const currentSerials = formData.serial_numbers.split(' ').filter(sn => sn.trim());
+                          if (currentSerials.includes(slot.serial_number)) {
+                            // Remove if already selected
+                            const newSerials = currentSerials.filter(sn => sn !== slot.serial_number);
+                            handleChange('serial_numbers', newSerials.join(' '));
+                          } else {
+                            // Add if not selected
+                            const newSerials = [...currentSerials, slot.serial_number];
+                            handleChange('serial_numbers', newSerials.join(' '));
+                          }
+                        }}
+                        onMouseOver={(e) => {
+                          if (!selectedSerials.includes(slot.serial_number)) {
+                            e.target.style.background = 'var(--bg-hover)';
+                            e.target.style.transform = 'scale(1.02)';
+                            e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.2)';
+                          }
+                        }}
+                        onMouseOut={(e) => {
+                          if (!selectedSerials.includes(slot.serial_number)) {
+                            e.target.style.background = 'var(--bg-primary)';
+                            e.target.style.transform = 'scale(1)';
+                            e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                          }
+                        }}
+                      >
+                        {slot.serial_number}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Action Buttons */}
+            <div style={{ 
+              display: 'flex', 
+              gap: '16px', 
+              justifyContent: 'flex-end',
+              padding: '24px 0 0 0',
+              borderTop: '2px solid var(--border-color)',
+              marginTop: '24px'
+            }}>
+              <button 
+                type="button" 
+                onClick={onClose}
+                style={{
+                  background: 'linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%)',
+                  color: 'var(--text-primary)',
+                  border: '2px solid var(--border-color)',
+                  padding: '16px 32px',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  fontSize: '1.1rem',
+                  fontWeight: 'bold',
+                  transition: 'all 0.3s ease',
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = 'linear-gradient(135deg, var(--bg-hover) 0%, var(--bg-secondary) 100%)';
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 6px 12px rgba(0,0,0,0.2)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = 'linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%)';
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)';
+                }}
+              >
+                ❌ Cancel
+              </button>
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                style={{
+                  background: isSubmitting 
+                    ? 'linear-gradient(135deg, var(--text-secondary) 0%, #666 100%)' 
+                    : 'linear-gradient(135deg, var(--accent-color) 0%, #0056b3 100%)',
+                  color: 'white',
+                  border: 'none',
+                  padding: '16px 32px',
+                  borderRadius: '10px',
+                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  fontSize: '1.1rem',
+                  fontWeight: 'bold',
+                  transition: 'all 0.3s ease',
+                  opacity: isSubmitting ? 0.7 : 1,
+                  boxShadow: isSubmitting 
+                    ? '0 2px 4px rgba(0,0,0,0.1)' 
+                    : '0 4px 12px rgba(0, 212, 255, 0.3)'
+                }}
+                onMouseOver={(e) => {
+                  if (!isSubmitting) {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 6px 16px rgba(0, 212, 255, 0.4)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!isSubmitting) {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 12px rgba(0, 212, 255, 0.3)';
+                  }
+                }}
+              >
+                {isSubmitting ? '⏳ Creating CVT Records...' : '✅ Create CVT Records'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
+    // Define slotColumns at the beginning to be accessible in both 'slots' and 'warehouse' cases
+    const slotColumns = [
+            {
+              key: 'serial_number',
+              label: 'Serial Number',
+              render: (item) => {
+                const location = locations.find(l => l.id === item.location_id);
+                return (
+                  <div className="serial-cell" style={{ maxWidth: '120px' }}>
+                    <div 
+                      className={`serial-primary clickable-filter ${selectedSerialFilter === item.serial_number ? 'active-filter' : ''}`}
+                      onClick={() => toggleSerialFilter(item.serial_number)}
+                      style={{ cursor: 'pointer', fontSize: '0.9em' }}
+                    >
+                      <strong>{item.serial_number || 'N/A'}</strong>
+                    </div>
+                    <div className="serial-secondary">
+                      <small 
+                        className={`location-info clickable-filter ${selectedLocationFilter === item.location_id ? 'active-filter' : ''}`}
+                        onClick={() => toggleLocationFilter(item.location_id)}
+                        style={{ fontSize: '0.8em' }}
+                      >
+                        {location ? location.name : 'N/A'}
+                      </small>
+                    </div>
+                  </div>
+                );
+              }
+            },
+            { key: 'provider_id', label: 'Provider', render: (item) => {
+                const provider = providers.find(p => p.id === item.provider_id);
+                const cabinet = cabinets.find(c => c.id === item.cabinet_id);
+                return (
+                  <div>
+                    <div 
+                      className={`clickable-filter ${selectedProviderFilter === item.provider_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleProviderFilter(item.provider_id)}
+                      style={{ cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      {provider ? provider.name : 'N/A'}
+                    </div>
+                    <div
+                      className={`clickable-filter ${selectedCabinetFilter === item.cabinet_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleCabinetFilter(item.cabinet_id)}
+                      style={{ fontSize: 12, cursor: 'pointer' }}
+                    >
+                      {cabinet ? cabinet.name : 'No Cabinet'}
+                    </div>
+                  </div>
+                );
+        }
+      },
+            {
+              key: 'game_mix_id',
+              label: 'Game Mix',
+              render: (item) => {
+                const gameMix = gameMixes.find(gm => gm.id === item.game_mix_id);
+                const cabinet = cabinets.find(c => c.id === item.cabinet_id);
+                return (
+                  <div>
+                    <div 
+                      className={`clickable-filter ${selectedGameMixFilter === item.game_mix_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleGameMixFilter(item.game_mix_id)}
+                      style={{ cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      {gameMix ? gameMix.name : 'N/A'}
+                    </div>
+                    <div 
+                      className={`clickable-filter ${selectedCabinetFilter === item.cabinet_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleCabinetFilter(item.cabinet_id)}
+                      style={{ fontSize: 12, cursor: 'pointer' }}
+                    >
+                      {cabinet && cabinet.model ? cabinet.model : 'No Model'}
+                    </div>
+                  </div>
+                );
+              }
+            },
+          { 
+            key: 'property_details', 
+            label: 'Property',
+            render: (item) => {
+          // 1. Dacă ownership_type este 'rent', afișează providerul de închiriere și contractul
+          if (item.ownership_type === 'rent') {
+            const rentProvider = providers.find(p => p.id === item.lease_provider_id);
+            const contractNumber = item.lease_contract_number || (item.serial_number ? `RENT-${item.serial_number}-${new Date().getFullYear()}` : 'No Contract');
+            return (
+              <div className="property-cell">
+                <div 
+                  className={`property-primary clickable-filter ${selectedProviderFilter === item.lease_provider_id ? 'active-filter' : ''}`}
+                  onClick={() => toggleProviderFilter(item.lease_provider_id)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <span style={{fontSize:'1.1em'}}>📄</span> <strong>{rentProvider ? rentProvider.company_name : 'No Provider Selected'}</strong>
+                </div>
+                <div className="property-secondary">
+                  <small 
+                    className={`clickable-filter ${selectedContractFilter === contractNumber ? 'active-filter' : ''}`}
+                    onClick={() => toggleContractFilter(contractNumber)}
+                    title={`Click to filter by contract: ${contractNumber}`}
+                  >
+                    📋 {contractNumber}
+                  </small>
+                  {item.production_year && (
+                    <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                      🏭 {item.production_year}
+                    </small>
+                  )}
+
+                </div>
+              </div>
+            );
+          }
+          // 2. Dacă ownership_type este 'property', afișează compania proprietar
+              if (item.ownership_type === 'property') {
+                const company = companies.find(c => c.id === item.owner_company_id);
+                return (
+                  <div className="property-cell">
+                    <div 
+                      className={`property-primary clickable-filter ${selectedCompanyFilter === item.owner_company_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleCompanyFilter(item.owner_company_id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                  <span style={{fontSize:'1.1em'}}>🏢</span> <strong>{company ? company.name : 'No Company Selected'}</strong>
+                    </div>
+                    <div className="property-secondary">
+                  <small>Property Owned</small>
+                  {item.production_year && (
+                    <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                      🏭 {item.production_year}
+                      </small>
+                  )}
+                    </div>
+                  </div>
+                );
+          }
+          // 3. Dacă nu există ownership_type, caută factura și afișează buyer/seller
+          const invoice = invoices.find(inv => 
+            inv.serial_numbers && inv.serial_numbers.includes(item.serial_number)
+          );
+          if (invoice) {
+            const buyer = companies.find(c => c.id === invoice.buyer_id);
+            const seller = companies.find(c => c.id === invoice.seller_id);
+                return (
+                  <div className="property-cell">
+                    <div 
+                  className={`property-primary clickable-filter ${selectedCompanyFilter === invoice.buyer_id ? 'active-filter' : ''}`}
+                  onClick={() => toggleCompanyFilter(invoice.buyer_id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                  <span style={{fontSize:'1.1em'}}>🏢</span> <strong>{buyer ? buyer.name : 'Unknown Buyer'}</strong>
+                    </div>
+                    <div className="property-secondary">
+                      <small 
+                    className={`clickable-filter ${selectedInvoiceFilter === invoice.invoice_number ? 'active-filter' : ''}`}
+                    onClick={() => toggleInvoiceFilter(invoice.invoice_number)}
+                    title={`Click to filter by invoice: ${invoice.invoice_number}`}
+                  >
+                    📄 {invoice.invoice_number}
+                      </small>
+                  {seller && (
+                    <small style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>
+                      → {seller.name}
+                    </small>
+                  )}
+                  {item.production_year && (
+                    <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                      🏭 {item.production_year}
+                    </small>
+                  )}
+                    </div>
+                  </div>
+                );
+              }
+          // 4. Dacă nu există nimic, fallback la Unknown
+              return (
+                <div className="property-cell">
+              <div className="property-primary">❓ <strong>No Owner Info</strong></div>
+              <div className="property-secondary">
+                <small>Serial: {item.serial_number || 'N/A'}</small>
+                {item.production_year && (
+                  <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                    🏭 {item.production_year}
+                  </small>
+                )}
+              </div>
+                </div>
+              );
+            }
+          },
+
+          { 
+            key: 'technical_specs', 
+            label: 'Technical Specs',
+            render: (item) => {
+              const formatAmount = (amount) => {
+                if (!amount) return '0,00';
+                const num = parseFloat(amount);
+                if (isNaN(num)) return '0,00';
+                const formatted = num.toFixed(2);
+                const parts = formatted.split('.');
+                const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+                return `${integerPart},${parts[1]}`;
+              };
+              
+              return (
+                <div className="tech-specs-cell">
+                  <div className="spec-row">
+                    <span className="spec-label">Denom:</span>
+                    <span className="spec-value">{item.denomination ? formatAmount(item.denomination) : 'N/A'}</span>
+                  </div>
+                  <div className="spec-row">
+                    <span className="spec-label">Max Bet:</span>
+                    <span className="spec-value">{item.max_bet ? formatAmount(item.max_bet) : 'N/A'}</span>
+                  </div>
+                  <div className="spec-row">
+                    <span className="spec-label">RTP:</span>
+                    <span 
+                      className={`spec-value clickable-filter ${selectedRTPFilter === item.rtp ? 'active-filter' : ''}`}
+                      onClick={() => toggleRTPFilter(item.rtp)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {item.rtp ? `${item.rtp}%` : 'N/A'}
+                    </span>
+                  </div>
+                  <div className="spec-row">
+                    <span className="spec-label">Places:</span>
+                    <span 
+                      className={`spec-value clickable-filter ${selectedPlacesFilter === item.gaming_places ? 'active-filter' : ''}`}
+                      onClick={() => togglePlacesFilter(item.gaming_places)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {item.gaming_places || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+      },
+      // Add CVT Information column to slot machines table
+      {
+        key: 'cvt_information',
+        label: 'CVT Information',
+        render: (item) => {
+          // Find metrology record for this slot with proper multi-serial handling
+          const metrologyItem = metrology.find(m => {
+            if (!m.serial_number) {
+              return false;
+            }
+            
+            // Try both newline and space separation
+            const serialNumbersNewline = m.serial_number.split('\n').filter(s => s.trim());
+            const serialNumbersSpace = m.serial_number.split(' ').filter(s => s.trim());
+            
+            // Use the one that has more items (more likely to be correct)
+            const serialNumbers = serialNumbersNewline.length > serialNumbersSpace.length ? 
+              serialNumbersNewline : serialNumbersSpace;
+            
+            return serialNumbers.includes(item.serial_number);
+          });
+          
+          const cvtDate = metrologyItem?.cvt_expiry_date;
+          const cvtType = metrologyItem?.cvt_type;
+          
+          if (!cvtDate && !cvtType) {
+            return <span style={{ color: '#6b7280', fontStyle: 'italic' }}>No CVT Data</span>;
+          }
+          
+          // Calculate days remaining
+          let daysLeft = null;
+          if (cvtDate) {
+            const cvtExpiryDate = new Date(cvtDate);
+            const now = new Date();
+            const diff = Math.floor((cvtExpiryDate - now) / (1000 * 60 * 60 * 24));
+            daysLeft = diff > 0 ? diff : 0;
+          }
+          
+          // Color coding for days remaining
+          let daysColor = '#10b981'; // Green for > 90 days
+          if (daysLeft !== null) {
+            if (daysLeft <= 30) {
+              daysColor = '#ef4444'; // Red for ≤ 30 days
+            } else if (daysLeft <= 90) {
+              daysColor = '#f59e0b'; // Yellow for 31-90 days
+            }
+          }
+          
+          // Type colors
+          const typeColors = {
+            'periodic': { bg: '#dbeafe', text: '#1e40af', icon: '🔄' },
+            'reparation': { bg: '#fef3c7', text: '#d97706', icon: '🔧' }
+          };
+          
+          const colorScheme = typeColors[cvtType] || { bg: '#f3f4f6', text: '#6b7280', icon: '❓' };
+          
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {/* Row 1: CVT Type */}
+              {cvtType && (
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: colorScheme.bg,
+                  color: colorScheme.text,
+                  fontSize: '0.85em',
+                  fontWeight: '500',
+                  width: 'fit-content'
+                }}>
+                  <span>{colorScheme.icon}</span>
+                  <span style={{ textTransform: 'capitalize' }}>{cvtType}</span>
+                </div>
+              )}
+              
+              {/* Row 2: CVT Expiry Date */}
+              {cvtDate && (
+                <div 
+                  className={`clickable-filter ${selectedCvtDateFilter === cvtDate ? 'active-filter' : ''}`}
+                  onClick={() => toggleCvtDateFilter(cvtDate)}
+                  style={{ 
+                    fontSize: '0.9em', 
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    padding: '2px 4px',
+                    borderRadius: '4px',
+                    transition: 'background-color 0.2s'
+                  }}
+                >
+                  📅 {new Date(cvtDate).toLocaleDateString()}
+                </div>
+              )}
+              
+              {/* Row 3: Days Left */}
+              {daysLeft !== null && (
+                <div style={{
+                  textAlign: 'center', 
+                  color: daysColor,
+                  fontWeight: 'bold',
+                  fontSize: '1.1em',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: daysColor === '#ef4444' ? 'rgba(239, 68, 68, 0.1)' : 
+                                          daysColor === '#f59e0b' ? 'rgba(245, 158, 11, 0.1)' : 
+                                          'rgba(16, 185, 129, 0.1)',
+                  width: 'fit-content'
+                }}>
+                  {daysLeft} days left
+                </div>
+              )}
+            </div>
+          );
+        }
+      }
+    ];
+
     switch (activeView) {
       case 'dashboard':
         return renderDashboard();
@@ -2501,14 +6007,32 @@ const Dashboard = () => {
             key: 'avatar', 
             label: 'Logo',
             render: (item) => (
-              <AvatarDisplay entityType="companies" entityId={item.id} size={40} />
+                              <AvatarDisplay entityType="companies" entityId={item.id} size={50} entityName={item.name} />
             )
           },
           { key: 'name', label: 'Company Name' },
           { key: 'registration_number', label: 'Registration' },
           { key: 'contact_person', label: 'Contact Person' },
-          { key: 'email', label: 'Email' },
-          { key: 'phone', label: 'Phone' }
+          { 
+            key: 'email', 
+            label: 'Email',
+            render: (item) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>📧</span>
+                <span>{item.email || 'N/A'}</span>
+              </div>
+            )
+          },
+          { 
+            key: 'phone', 
+            label: 'Phone',
+            render: (item) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>📞</span>
+                <span>{item.phone || 'N/A'}</span>
+              </div>
+            )
+          }
         ], { 
           onAdd: () => handleAddEntity('companies'),
           onEdit: (item) => handleEditEntity(item, 'companies'),
@@ -2520,6 +6044,13 @@ const Dashboard = () => {
         }, 'companies');
       case 'locations':
         return renderTable('Locations', locations, [
+          { 
+            key: 'avatar', 
+            label: 'Avatar',
+            render: (item) => (
+                              <AvatarDisplay entityType="locations" entityId={item.id} size={50} entityName={item.name} />
+            )
+          },
           { key: 'name', label: 'Location Name' },
           { key: 'address', label: 'Address' },
           { key: 'city', label: 'City' },
@@ -2529,6 +6060,41 @@ const Dashboard = () => {
             label: 'Coordinates',
             render: (item) => item.latitude && item.longitude ? 
               `${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}` : 'N/A'
+          },
+          { 
+            key: 'contact_person', 
+            label: 'Contact Person',
+            render: (item) => {
+              // Dacă contact_person_id există, caută user-ul
+              if (item.contact_person_id) {
+                const contactUser = users.find(u => u.id === item.contact_person_id);
+                if (contactUser) {
+              return (
+                <div>
+                      <div style={{ fontWeight: 'bold' }}>
+                        {contactUser.first_name && contactUser.last_name ? 
+                          `${contactUser.first_name} ${contactUser.last_name}` : 
+                          contactUser.username}
+                      </div>
+                      <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
+                        📧 {contactUser.email || 'N/A'} | 📞 {contactUser.phone || 'N/A'}
+                  </div>
+                </div>
+              );
+            }
+              }
+              // Dacă nu există contact_person_id, afișează contact_person ca text
+              return item.contact_person ? (
+                <div>
+                  <div style={{ fontWeight: 'bold' }}>
+                    {item.contact_person}
+                  </div>
+                  <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
+                    📧 {item.contact_email || 'N/A'} | 📞 {item.contact_phone || 'N/A'}
+                  </div>
+                </div>
+              ) : 'No contact person';
+            }
           }
         ], { 
           onAdd: () => handleAddEntity('locations'),
@@ -2541,54 +6107,51 @@ const Dashboard = () => {
         }, 'locations');
       case 'providers':
         return renderTable('Providers', providers, [
-          { 
-            key: 'avatar', 
+          {
+            key: 'avatar',
             label: 'Avatar',
             render: (item) => (
-              <AvatarDisplay entityType="providers" entityId={item.id} size={40} />
+              <div className="provider-avatar-cell">
+                <AvatarDisplay entityType="providers" entityId={item.id} size={50} entityName={item.name || 'Unknown Provider'} />
+              </div>
             )
           },
           { key: 'name', label: 'Provider Name' },
           { key: 'company_name', label: 'Company' },
           { key: 'contact_person', label: 'Contact Person' },
-          { key: 'email', label: 'Email' },
           { 
-            key: 'website', 
+            key: 'email', 
+            label: 'Email',
+            render: (item) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>📧</span>
+                <span>{item.email || 'N/A'}</span>
+              </div>
+            )
+          },
+          {
+            key: 'website',
             label: 'Website',
-            render: (item) => item.website ? 
+            render: (item) => item.website ?
               <a href={item.website} target="_blank" rel="noopener noreferrer" className="link">
                 {item.website}
               </a> : 'N/A'
           }
-        ], { 
+        ], {
           onAdd: () => handleAddEntity('providers'),
           onEdit: (item) => handleEditEntity(item, 'providers'),
-          onDelete: (id) => handleDeleteEntity(id, 'providers'),
-          onBulkEdit: () => handleBulkEdit('providers'),
-          onBulkDelete: () => handleBulkDelete('providers'),
-          onExport: () => handleExport('providers'),
-          onImport: () => handleImport('providers')
-        }, 'providers');
+          onDelete: (id) => handleDeleteEntity(id, 'providers')
+        });
       case 'cabinets':
         return renderTable('Cabinets', cabinets, [
-          { 
-            key: 'avatar', 
-            label: 'Logo',
-            render: (item) => (
-              <AvatarDisplay entityType="cabinets" entityId={item.id} size={40} />
-            )
-          },
+                      { key: 'logo', label: 'Logo', render: (item) => <AvatarDisplay entityType="cabinets" entityId={item.id} size={50} entityName={item.name} /> },
           { key: 'name', label: 'Name' },
           { key: 'model', label: 'Model' },
-          { 
-            key: 'provider_id', 
-            label: 'Provider',
-            render: (item) => {
+          { key: 'provider_id', label: 'Provider', render: (item) => {
               const provider = providers.find(p => p.id === item.provider_id);
-              return provider ? provider.name : 'Unknown Provider';
-            }
-          }
-        ], { 
+              return provider ? provider.name : 'N/A';
+          } },
+        ], {
           onAdd: () => handleAddEntity('cabinets'),
           onEdit: (item) => handleEditEntity(item, 'cabinets'),
           onDelete: (id) => handleDeleteEntity(id, 'cabinets'),
@@ -2597,74 +6160,553 @@ const Dashboard = () => {
           onExport: () => handleExport('cabinets'),
           onImport: () => handleImport('cabinets')
         }, 'cabinets');
-      case 'slots':
-        return renderTable('Slot Machines', slotMachines, [
-          { key: 'model', label: 'Model' },
-          { key: 'serial_number', label: 'Serial Number' },
+      case 'slots': {
+        // Show only active slots (including those without status set)
+        const activeSlots = slotMachines.filter(s => s.status !== 'inactive');
+        const activeCount = activeSlots.length;
+        return renderTable(`Slot Machines (${activeCount} active)`, activeSlots, slotColumns, {
+          onAdd: () => handleAddEntity('slots'),
+          onEdit: (item) => handleEditEntity(item, 'slots'),
+          onDelete: (id) => handleDeleteEntity(id, 'slots'),
+          onBulkEdit: () => handleBulkEdit('slots'),
+          onBulkDelete: () => handleBulkDelete('slots'),
+          onBulkDuplicate: () => handleBulkDuplicate('slots'),
+          onExport: () => handleExport('slots'),
+          onImport: () => handleImport('slots')
+        }, 'slots');
+      }
+      case 'warehouse': {
+        // Show only inactive slots
+        const warehouseSlots = slotMachines.filter(s => s.status === 'inactive');
+        const warehouseCount = warehouseSlots.length;
+        return renderTable(`Warehouse (${warehouseCount} inactive)`, warehouseSlots, slotColumns, {
+          onAdd: () => handleAddEntity('slots'),
+          onEdit: (item) => handleEditEntity(item, 'slots'),
+          onDelete: (id) => handleDeleteEntity(id, 'slots'),
+          onBulkEdit: () => handleBulkEdit('slots'),
+          onBulkDelete: () => handleBulkDelete('slots'),
+          onBulkDuplicate: () => handleBulkDuplicate('slots'),
+          onExport: () => handleExport('slots'),
+          onImport: () => handleImport('slots')
+        }, 'slots');
+      }
+      case 'metrology': {
+        // Fiecare rând = un slot ACTIV din slotMachines
+        const metrologyRows = slotMachines
+          .filter(slot => slot.status === 'active') // Doar sloturi active
+          .map(slot => {
+            // Găsește metrologia asociată slotului (după serial_number)
+            const metrologyItem = metrology.find(m => m.serial_number === slot.serial_number) || {};
+            // Calculează zile rămase până la expirarea CVT-ului
+            // cvt_expiry_date este data când expiră CVT-ul
+            let daysLeft = '';
+            if (metrologyItem.cvt_expiry_date) {
+              // Data când expiră CVT-ul
+              const cvtExpiryDate = new Date(metrologyItem.cvt_expiry_date);
+              const now = new Date();
+              const diff = Math.floor((cvtExpiryDate - now) / (1000 * 60 * 60 * 24));
+              daysLeft = diff > 0 ? diff : 0;
+              
+              console.log('🔍 CVT Expiry calculation:', {
+                serialNumber: slot.serial_number,
+                cvtExpiryDate: metrologyItem.cvt_expiry_date,
+                cvtExpiryDateObj: cvtExpiryDate,
+                now: now,
+                daysRemaining: daysLeft,
+                note: 'cvt_expiry_date is the expiry date of CVT'
+              });
+            } else {
+              // Dacă nu există cvt_expiry_date, nu se poate calcula
+              daysLeft = '';
+              console.log('⚠️ No CVT expiry date available for:', slot.serial_number);
+            }
+            return {
+              ...slot,
+              cvt_expiry_date: metrologyItem.cvt_expiry_date || '',
+              cvt_file: metrologyItem.cvt_file || null,
+              days_left: daysLeft,
+              metrology_id: metrologyItem.id || null,
+            };
+          });
+
+        const metrologyColumns = [
+            {
+              key: 'serial_number',
+              label: 'Serial Number',
+              render: (item) => {
+                const location = locations.find(l => l.id === item.location_id);
+                return (
+                <div className="serial-cell" style={{ maxWidth: '120px' }}>
+                    <div 
+                      className={`serial-primary clickable-filter ${selectedSerialFilter === item.serial_number ? 'active-filter' : ''}`}
+                      onClick={() => toggleSerialFilter(item.serial_number)}
+                    style={{ cursor: 'pointer', fontSize: '0.9em' }}
+                    >
+                      <strong>{item.serial_number || 'N/A'}</strong>
+                    </div>
+                    <div className="serial-secondary">
+                      <small 
+                        className={`location-info clickable-filter ${selectedLocationFilter === item.location_id ? 'active-filter' : ''}`}
+                        onClick={() => toggleLocationFilter(item.location_id)}
+                      style={{ fontSize: '0.8em' }}
+                      >
+                        {location ? location.name : 'N/A'}
+                      </small>
+                    </div>
+                  </div>
+                );
+              }
+            },
           { 
             key: 'provider_id', 
+            label: 'Provider', 
+            render: (item) => {
+                const provider = providers.find(p => p.id === item.provider_id);
+                const cabinet = cabinets.find(c => c.id === item.cabinet_id);
+                return (
+                  <div>
+                    <div 
+                      className={`clickable-filter ${selectedProviderFilter === item.provider_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleProviderFilter(item.provider_id)}
+                      style={{ cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      {provider ? provider.name : 'N/A'}
+                    </div>
+                    <div
+                      className={`clickable-filter ${selectedCabinetFilter === item.cabinet_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleCabinetFilter(item.cabinet_id)}
+                      style={{ fontSize: 12, cursor: 'pointer' }}
+                    >
+                      {cabinet ? cabinet.name : 'No Cabinet'}
+                    </div>
+                  </div>
+                );
+            }
+          },
+            {
+              key: 'game_mix_id',
+              label: 'Game Mix',
+              render: (item) => {
+                const gameMix = gameMixes.find(gm => gm.id === item.game_mix_id);
+                const cabinet = cabinets.find(c => c.id === item.cabinet_id);
+                return (
+                  <div>
+                    <div 
+                      className={`clickable-filter ${selectedGameMixFilter === item.game_mix_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleGameMixFilter(item.game_mix_id)}
+                      style={{ cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      {gameMix ? gameMix.name : 'N/A'}
+                    </div>
+                    <div 
+                      className={`clickable-filter ${selectedCabinetFilter === item.cabinet_id ? 'active-filter' : ''}`}
+                      onClick={() => toggleCabinetFilter(item.cabinet_id)}
+                      style={{ fontSize: 12, cursor: 'pointer' }}
+                    >
+                      {cabinet && cabinet.model ? cabinet.model : 'No Model'}
+                    </div>
+                  </div>
+                );
+              }
+            },
+          { 
+            key: 'commission_date',
+            label: 'Data Licenței',
+            render: (item) => item.commission_date ? new Date(item.commission_date).toLocaleDateString() : '-'
+          },
+
+        ];
+
+        return renderTable('Metrologie', metrologyRows, metrologyColumns, {
+          onAdd: () => handleAddEntity('metrology'),
+          onEdit: (item) => handleEditEntity(item, 'metrology'),
+          onDelete: (id) => handleDeleteEntity(id, 'metrology'),
+          onBulkEdit: () => handleBulkEdit('metrology'),
+          onBulkDelete: () => handleBulkDelete('metrology'),
+          onExport: () => handleExport('metrology'),
+          onImport: () => handleImport('metrology')
+        }, 'metrology');
+      }
+      case 'metrology2': {
+        const selectedMetrologyItems = selectedItems.filter(id => metrology.some(item => item.id === id));
+        const hasSelectedItems = selectedMetrologyItems.length > 0;
+        
+        return (
+          <div className="table-container">
+            <div className="table-header">
+              <h2>Metrology 2 - CVT Data Administration</h2>
+              <div className="table-actions">
+                {hasSelectedItems && (
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '8px', 
+                    alignItems: 'center',
+                    background: 'var(--bg-primary)',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    marginRight: '12px'
+                  }}>
+                    <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                      {selectedMetrologyItems.length} selected
+                    </span>
+                    <button 
+                      className="btn-secondary"
+                      onClick={() => handleBulkEdit('metrology')}
+                      style={{ fontSize: '0.85rem', padding: '4px 8px' }}
+                    >
+                      ✏️ Bulk Edit
+                    </button>
+                    <button 
+                      className="btn-danger"
+                      onClick={() => handleBulkDelete('metrology')}
+                      style={{ fontSize: '0.85rem', padding: '4px 8px' }}
+                    >
+                      🗑️ Bulk Delete
+                    </button>
+                  </div>
+                )}
+                <button 
+                  className="btn-primary"
+                  onClick={() => handleAddEntity('metrology')}
+                >
+                  <span className="icon">➕</span>
+                  Add CVT Date
+                </button>
+              </div>
+            </div>
+            
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '40px' }}>
+                      <input
+                        type="checkbox"
+                        checked={metrology.length > 0 && selectedMetrologyItems.length === metrology.length}
+                        onChange={(e) => handleSelectAll(metrology, e.target.checked)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </th>
+                    <th>#</th>
+                    <th>Certificate Number</th>
+                    <th>Certificate Type</th>
+                    <th>Issue Date</th>
+                    <th>CVT Type</th>
+                    <th>CVT End Date</th>
+                    <th>Number of Slots</th>
+                    <th>Created At</th>
+                    <th>Created By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metrology.map((item, index) => {
+                    const createdByUser = users.find(user => user.id === item.created_by || user.username === item.created_by);
+                    const daysUntilExpiry = item.cvt_expiry_date ? 
+                      Math.ceil((new Date(item.cvt_expiry_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+                    const isSelected = selectedItems.includes(item.id);
+                    
+                    return (
+                      <tr 
+                        key={item.id}
+                        style={{ 
+                          backgroundColor: isSelected ? 'var(--accent-color)' : 'transparent',
+                          opacity: isSelected ? 0.9 : 1
+                        }}
+                      >
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => handleItemSelection(item.id, e.target.checked)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td>{index + 1}</td>
+                        <td>
+                          <strong>{item.certificate_number || 'N/A'}</strong>
+                        </td>
+                        <td>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            🔧 {item.certificate_type || 'N/A'}
+                          </span>
+                        </td>
+                        <td>{item.issue_date ? new Date(item.issue_date).toLocaleDateString() : 'N/A'}</td>
+                        <td>
+                          <span style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '4px',
+                            color: item.cvt_type === 'periodic' ? '#007bff' : '#dc3545'
+                          }}>
+                            {item.cvt_type === 'periodic' ? '🔄' : '🔧'} {item.cvt_type || 'N/A'}
+                          </span>
+                        </td>
+                        <td>
+                          {item.cvt_expiry_date ? (
+                            <div>
+                              <div style={{ fontWeight: 'bold' }}>
+                                {new Date(item.cvt_expiry_date).toLocaleDateString()}
+                              </div>
+                              {(() => {
+                                const daysUntilExpiry = Math.ceil((new Date(item.cvt_expiry_date) - new Date()) / (1000 * 60 * 60 * 24));
+                                return (
+                                  <div style={{ 
+                                    fontSize: '0.9em',
+                                    color: daysUntilExpiry <= 30 ? '#dc3545' : daysUntilExpiry <= 90 ? '#ffc107' : '#28a745',
+                                    fontWeight: 'bold'
+                                  }}>
+                                    {daysUntilExpiry > 0 ? `${daysUntilExpiry} days left` : `${Math.abs(daysUntilExpiry)} days overdue`}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          ) : 'N/A'}
+                        </td>
+
+                        <td>
+                          <span style={{ 
+                            backgroundColor: 'var(--accent-color)', 
+                            color: 'white',
+                            padding: '4px 8px',
+                            borderRadius: '12px',
+                            fontSize: '0.9em',
+                            fontWeight: 'bold'
+                          }}>
+                            {item.serial_number ? item.serial_number.split('\n').filter(s => s.trim()).length : 0} slots
+                          </span>
+                        </td>
+                        <td>{item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A'}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <AvatarDisplay 
+                              entityType="users" 
+                              entityId={item.created_by} 
+                              size={24} 
+                              entityName={createdByUser?.username || 'Unknown User'}
+                            />
+                            <span>{createdByUser?.username || 'Unknown User'}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="action-buttons">
+                            <button 
+                              className="btn-edit"
+                              onClick={() => handleEditEntity(item, 'metrology')}
+                              title="Edit CVT Date"
+                            >
+                              ✏️
+                            </button>
+                            <button 
+                              className="btn-delete"
+                              onClick={() => handleDeleteEntity(item.id, 'metrology')}
+                              title="Delete CVT Date"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              
+              {metrology.length === 0 && (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+                  <h3>No CVT Records Found</h3>
+                  <p>Use the "Add CVT Date" button to create your first CVT record.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+      case 'jackpots': {
+        return renderTable('Jackpot Records', jackpots, [
+          { key: 'serial_number', label: 'Serial Number', render: (item) => (
+            <div className="serial-cell">
+                    <div 
+                className={`serial-primary clickable-filter ${selectedSerialFilter === item.serial_number ? 'active-filter' : ''}`}
+                onClick={() => toggleSerialFilter(item.serial_number)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                <strong>{item.serial_number || 'N/A'}</strong>
+                    </div>
+                    </div>
+          )},
+          { key: 'jackpot_name', label: 'Jackpot Name' },
+          { key: 'jackpot_type', label: 'Type', render: (item) => {
+            const typeColors = {
+              'progressive': '📈',
+              'fixed': '💰',
+              'mystery': '🎭'
+            };
+              return (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {typeColors[item.jackpot_type] || '🎰'} {item.jackpot_type}
+              </span>
+              );
+          }},
+          { key: 'current_amount', label: 'Current Amount', render: (item) => `€${item.current_amount.toLocaleString()}` },
+          { key: 'max_amount', label: 'Max Amount', render: (item) => `€${item.max_amount.toLocaleString()}` },
+          { key: 'reset_amount', label: 'Reset Amount', render: (item) => `€${item.reset_amount.toLocaleString()}` },
+          { key: 'increment_rate', label: 'Increment Rate', render: (item) => `${item.increment_rate}%` },
+          { key: 'last_reset_date', label: 'Last Reset', render: (item) => new Date(item.last_reset_date).toLocaleDateString() },
+          { key: 'status', label: 'Status', render: (item) => {
+            const statusColors = {
+              'active': '🟢',
+              'inactive': '🔴',
+              'won': '🏆'
+            };
+              return (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {statusColors[item.status] || '⚪'} {item.status}
+                    </span>
+            );
+          }},
+          { key: 'description', label: 'Description' }
+        ], { 
+          onAdd: () => handleAddEntity('jackpots'),
+          onEdit: (item) => handleEditEntity(item, 'jackpots'),
+          onDelete: (id) => handleDeleteEntity(id, 'jackpots'),
+          onBulkEdit: () => handleBulkEdit('jackpots'),
+          onBulkDelete: () => handleBulkDelete('jackpots'),
+          onExport: () => handleExport('jackpots'),
+          onImport: () => handleImport('jackpots')
+        }, 'jackpots');
+      }
+      case 'gamemixes':
+        return renderTable('Game Mixes', gameMixes, [
+          {
+            key: 'avatar',
+            label: 'Avatar',
+            render: (item) => (
+              <AvatarDisplay entityType="game_mixes" entityId={item.id} size={80} rectangular={true} entityName={item.name} />
+            )
+          },
+          { key: 'name', label: 'Mix Name' },
+          { key: 'description', label: 'Description' },
+          {
+            key: 'provider_id',
             label: 'Provider',
             render: (item) => {
               const provider = providers.find(p => p.id === item.provider_id);
               return provider ? provider.name : 'Unknown Provider';
             }
           },
-          { key: 'invoice_number', label: 'Invoice Number' },
-          { 
-            key: 'denomination', 
-            label: 'Denomination',
-            render: (item) => `${item.denomination}€`
-          },
-          { 
-            key: 'max_bet', 
-            label: 'Max Bet',
-            render: (item) => `${item.max_bet}€`
-          },
-          { 
-            key: 'rtp', 
-            label: 'RTP',
-            render: (item) => `${item.rtp}%`
-          },
-          { key: 'gaming_places', label: 'Gaming Places' }
-        ], { 
-          onAdd: () => handleAddEntity('slots'),
-          onEdit: (item) => handleEditEntity(item, 'slots'),
-          onDelete: (id) => handleDeleteEntity(id, 'slots'),
-          onBulkEdit: () => handleBulkEdit('slots'),
-          onBulkDelete: () => handleBulkDelete('slots'),
-          onExport: () => handleExport('slots'),
-          onImport: () => handleImport('slots')
-        }, 'slots');
-      case 'gamemixes':
-        return renderTable('Game Mixes', gameMixes, [
-          { 
-            key: 'avatar', 
-            label: 'Avatar',
-            render: (item) => (
-              <AvatarDisplay entityType="game_mixes" entityId={item.id} size={40} />
-            )
-          },
-          { key: 'name', label: 'Mix Name' },
-          { key: 'description', label: 'Description' },
-          { key: 'game_count', label: 'Game Count' },
-          { 
-            key: 'games', 
-            label: 'Top Games',
-            render: (item) => item.games.slice(0, 3).join(', ') + 
-              (item.games.length > 3 ? '...' : '')
+          { key: 'games', label: 'Games', render: (item) => (item.games || []).join(', ') },
+          {
+            key: 'campus_web',
+            label: 'Campus Web',
+            render: (item) => {
+              if (item.campus_web && item.campus_web.startsWith('https://')) {
+                return (
+                  <a 
+                    href={item.campus_web} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="link"
+                    style={{ color: 'var(--accent-color)', textDecoration: 'underline' }}
+                  >
+                    🌐 {item.campus_web}
+                  </a>
+                );
+              }
+              return item.campus_web || 'N/A';
+            }
           }
-        ], { 
+        ], {
           onAdd: () => handleAddEntity('gamemixes'),
           onEdit: (item) => handleEditEntity(item, 'gamemixes'),
-          onDelete: (id) => handleDeleteEntity(id, 'gamemixes'),
-          onBulkEdit: () => handleBulkEdit('gamemixes'),
-          onBulkDelete: () => handleBulkDelete('gamemixes'),
-          onExport: () => handleExport('gamemixes'),
-          onImport: () => handleImport('gamemixes')
+          onDelete: (id) => handleDeleteEntity(id, 'gamemixes')
         });
       case 'invoices':
         return renderTable('Invoices', invoices, [
-          { key: 'invoice_number', label: 'Invoice Number' },
+          { 
+            key: 'invoice_number', 
+            label: 'Invoice Number',
+            render: (item) => (
+              <span 
+                className="clickable-invoice-number" 
+                onClick={() => handleInvoiceClick(item)}
+                style={{ cursor: 'pointer', color: 'var(--accent-color)', textDecoration: 'underline' }}
+              >
+                {item.invoice_number}
+              </span>
+            )
+          },
+          { 
+            key: 'buyer_id', 
+            label: 'Buyer',
+            render: (item) => {
+              const buyer = companies.find(c => c.id === item.buyer_id);
+              return (
+                <div>
+                  <div style={{ fontWeight: 'bold' }}>
+                    {buyer ? buyer.name : 'Unknown Buyer'}
+                  </div>
+                  <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
+                    {buyer ? buyer.contact_person || 'No contact person' : 'N/A'}
+                  </div>
+                </div>
+              );
+            }
+          },
+          { 
+            key: 'seller_id', 
+            label: 'Seller',
+            render: (item) => {
+              const seller = providers.find(p => p.id === item.seller_id);
+              return (
+                <div>
+                  <div style={{ fontWeight: 'bold' }}>
+                    {seller ? seller.name : 'Unknown Seller'}
+                  </div>
+                  <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
+                    {seller ? seller.contact_person || 'No contact person' : 'N/A'}
+                  </div>
+                </div>
+              );
+            }
+          },
+          { 
+            key: 'location', 
+            label: 'Location',
+            render: (item) => {
+              // Find location based on serial numbers in the invoice
+              let location = null;
+              if (item.serial_numbers) {
+                const serialArray = item.serial_numbers.split(' ').filter(s => s.trim());
+                if (serialArray.length > 0) {
+                  // Find the first slot machine with matching serial number
+                  const slotMachine = slotMachines.find(slot => 
+                    serialArray.includes(slot.serial_number)
+                  );
+                  if (slotMachine) {
+                    location = locations.find(l => l.id === slotMachine.location_id);
+                  }
+                }
+              }
+              
+              // Fallback to direct location_id if no slot machine found
+              if (!location && item.location_id) {
+                location = locations.find(l => l.id === item.location_id);
+              }
+              
+              return (
+                <div>
+                  <div style={{ fontWeight: 'bold' }}>
+                    {location ? location.name : 'No location'}
+                  </div>
+                  <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
+                    {location ? `${location.city}, ${location.county}` : 'N/A'}
+                  </div>
+                </div>
+              );
+            }
+          },
           { 
             key: 'issue_date', 
             label: 'Issue Date',
@@ -2678,9 +6720,81 @@ const Dashboard = () => {
           { 
             key: 'amount', 
             label: 'Amount',
-            render: (item) => `${item.amount} ${item.currency}`
+            render: (item) => {
+              const formatAmount = (amount) => {
+                if (!amount) return '0,00';
+                const num = parseFloat(amount);
+                if (isNaN(num)) return '0,00';
+                const formatted = num.toFixed(2);
+                const parts = formatted.split('.');
+                const integerPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+                return `${integerPart},${parts[1]}`;
+              };
+              return formatAmount(item.amount);
+            }
           },
-          { key: 'description', label: 'Description' }
+          { 
+            key: 'currency', 
+            label: 'Currency',
+            render: (item) => item.currency || 'EUR'
+          },
+          { 
+            key: 'status', 
+            label: 'Status',
+            render: (item) => {
+              const statusColors = {
+                'paid': '🟢',
+                'pending': '🟡',
+                'overdue': '🔴',
+                'cancelled': '⚫'
+              };
+              return (
+                <span style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '4px',
+                  fontWeight: 'bold'
+                }}>
+                  {statusColors[item.status] || '⚪'} {item.status || 'Unknown'}
+                </span>
+              );
+            }
+          },
+          { 
+            key: 'serial_numbers', 
+            label: 'Serial Numbers',
+            render: (item) => {
+              if (!item.serial_numbers) {
+                return 'No serial numbers';
+              }
+              // Handle serial_numbers as a string (space-separated values)
+              const serialArray = item.serial_numbers.split(' ').filter(s => s.trim());
+              if (serialArray.length === 0) {
+                return 'No serial numbers';
+              }
+              return (
+                <div style={{ maxWidth: '200px' }}>
+                  {serialArray.slice(0, 3).join(', ')}
+                  {serialArray.length > 3 && ` +${serialArray.length - 3} more`}
+                </div>
+              );
+            }
+          },
+          { 
+            key: 'description', 
+            label: 'Description',
+            render: (item) => {
+              const cleanDescription = (description) => {
+                if (!description) return 'No description';
+                return description
+                  .replace(/€/g, '')
+                  .replace(/EUR/g, '')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+              };
+              return cleanDescription(item.description);
+            }
+          }
         ], { 
           onAdd: () => handleAddEntity('invoices'),
           onEdit: (item) => handleEditEntity(item, 'invoices'),
@@ -2745,11 +6859,43 @@ const Dashboard = () => {
             key: 'avatar', 
             label: 'Avatar',
             render: (item) => (
-              <AvatarDisplay entityType="users" entityId={item.id} size={40} />
+                              <AvatarDisplay entityType="users" entityId={item.id} size={50} entityName={`${item.first_name} ${item.last_name}`} />
             )
           },
-          { key: 'username', label: 'Username' },
-          { key: 'email', label: 'Email' },
+          { 
+            key: 'username', 
+            label: 'Username',
+            render: (item) => (
+              <div>
+                <div style={{ fontWeight: 'bold' }}>
+                  {item.username || 'N/A'}
+                </div>
+                <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
+                  {item.first_name && item.last_name ? `${item.first_name} ${item.last_name}` : 'No name set'}
+                </div>
+              </div>
+            )
+          },
+          { 
+            key: 'email', 
+            label: 'Email',
+            render: (item) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>📧</span>
+                <span>{item.email || 'N/A'}</span>
+              </div>
+            )
+          },
+          { 
+            key: 'phone', 
+            label: 'Phone',
+            render: (item) => (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>📞</span>
+                <span>{item.phone || 'N/A'}</span>
+              </div>
+            )
+          },
           { key: 'role', label: 'Role' },
           { 
             key: 'assigned_locations', 
@@ -2797,7 +6943,7 @@ const Dashboard = () => {
   }
 
   return (
-    <div className={`app-layout ${darkMode ? 'dark' : 'light'}`}>
+    <div className={`app-layout ${theme}`}>
       {/* Unified Header */}
       <div className="main-header">
         <div className="header-left">
@@ -2809,10 +6955,15 @@ const Dashboard = () => {
         <div className="header-right">
           <button 
             className="theme-toggle"
-            onClick={() => setDarkMode(!darkMode)}
-            title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            onClick={() => {
+              const themes = ['light', 'dark', 'dark-gambling'];
+              const currentIndex = themes.indexOf(theme);
+              const nextIndex = (currentIndex + 1) % themes.length;
+              setTheme(themes[nextIndex]);
+            }}
+            title={`Current: ${theme}. Click to cycle themes`}
           >
-            {darkMode ? '☀️' : '🌙'}
+            {theme === 'light' ? '☀️' : theme === 'dark' ? '🌙' : '🎰'}
           </button>
           <div className="header-user-info">
             <div className="header-user-avatar">
@@ -2838,7 +6989,7 @@ const Dashboard = () => {
             </div>
           </div>
           <button onClick={logout} className="header-logout-btn" title="Logout">
-            🚪
+            ⏻
           </button>
         </div>
       </div>
@@ -2847,45 +6998,45 @@ const Dashboard = () => {
       <div className="layout-container">
         {/* Sidebar */}
         <div className="sidebar">
-          <nav className="sidebar-nav">
-            {navigationItems.map(item => (
-              <button
-                key={item.id}
-                className={`nav-item ${activeView === item.id ? 'active' : ''}`}
-                onClick={() => setActiveView(item.id)}
-              >
-                <span className="nav-icon">{item.icon}</span>
-                <span className="nav-label">{item.label}</span>
-                {item.count !== undefined && (
-                  <span className="nav-count">{item.count}</span>
-                )}
-              </button>
-            ))}
-          </nav>
-          
-          <div className="sidebar-footer">
-            <div className="user-info">
-              <div className="user-avatar">
-                {user?.username?.charAt(0).toUpperCase()}
-              </div>
-              <div className="user-details">
+        <nav className="sidebar-nav">
+          {navigationItems.map(item => (
+            <button
+              key={item.id}
+              className={`nav-item ${activeView === item.id ? 'active' : ''}`}
+              onClick={() => setActiveView(item.id)}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+              {item.count !== undefined && (
+                <span className="nav-count">{item.count}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+        
+        <div className="sidebar-footer">
+          <div className="user-info">
+            <div className="user-avatar">
+              {user?.username?.charAt(0).toUpperCase()}
+            </div>
+            <div className="user-details">
                 <span className="user-name">
                   {user?.first_name && user?.last_name 
                     ? `${user.first_name} ${user.last_name}` 
                     : user?.username}
                 </span>
-                <span className="user-role">{user?.role}</span>
-              </div>
+              <span className="user-role">{user?.role}</span>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Main Content */}
-        <div className="main-content">
-          <div className="content-body">
-            {renderContent()}
-          </div>
+      {/* Main Content */}
+      <div className="main-content">
+        <div className="content-body">
+          {renderContent()}
         </div>
+      </div>
       </div> {/* Close layout-container */}
       
       {/* Entity Form Modal */}
@@ -2901,6 +7052,8 @@ const Dashboard = () => {
           cabinets={cabinets}
           gameMixes={gameMixes}
           invoices={invoices}
+          users={users}
+          slotMachines={slotMachines}
         />
       )}
 
@@ -2911,6 +7064,12 @@ const Dashboard = () => {
           selectedItems={selectedItems}
           onSave={handleBulkEditSave}
           onClose={() => setShowBulkEditForm(false)}
+          companies={companies}
+          locations={locations}
+          providers={providers}
+          cabinets={cabinets}
+          gameMixes={gameMixes}
+          slotMachines={slotMachines}
         />
       )}
       
@@ -2924,6 +7083,19 @@ const Dashboard = () => {
           locations={locations}
         />
       )}
+
+      {/* Invoice Popup Modal */}
+              {showInvoicePopup && (
+          <InvoicePopup 
+            invoice={selectedInvoice} 
+            onClose={handleCloseInvoicePopup} 
+          />
+        )}
+        {showAddCvtDatePopup && (
+          <AddCvtDatePopup 
+            onClose={handleCloseAddCvtDatePopup} 
+          />
+        )}
     </div>
   );
 };
@@ -2957,3 +7129,39 @@ const AppContent = () => {
 };
 
 export default App;
+
+// Adaug componenta GameMixAvatar sub AvatarDisplay
+function GameMixAvatar({ entityId, name }) {
+  const { avatar, loading } = useAvatar('game_mixes', entityId);
+  if (loading) return <div style={{ width: 20, height: 95 }} />;
+  if (avatar) {
+    return <img src={`data:${avatar.mime_type};base64,${avatar.file_data}`} alt="Avatar" style={{ width: 20, height: 95, objectFit: 'cover', borderRadius: 4 }} />;
+  }
+  // Fallback: background albastru cu text alb, font fix
+  
+  return (
+    <div style={{ 
+      width: 20, 
+      height: 95, 
+      background: '#1976d2', 
+      color: '#ffffff', 
+      fontWeight: 'bold', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      borderRadius: 4, 
+      fontSize: 12,
+      whiteSpace: 'normal', 
+      wordBreak: 'break-word',
+      textAlign: 'center',
+      padding: '0 2px',
+      lineHeight: '1.1'
+    }}>
+      {name}
+    </div>
+  );
+}
+
+// Adaug funcția handleMetrologyCvtDateChange pentru a salva data CVT la slot/metrology
+// Funcțiile pentru metrology sunt acum în interiorul componentei Dashboard
+
