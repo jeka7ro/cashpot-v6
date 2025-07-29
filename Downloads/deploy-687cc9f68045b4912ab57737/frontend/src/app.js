@@ -425,6 +425,9 @@ const useFiles = (entityType, entityId) => {
 // File Display Component
 const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
   const { files, loading, refetch } = useFiles(entityType, entityId);
+  const [hoveredFile, setHoveredFile] = useState(null);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const handleDownload = async (attachment) => {
     try {
@@ -495,6 +498,31 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
     }
   };
 
+  const handleMouseOver = async (file) => {
+    setHoveredFile(file);
+    setPreviewLoading(true);
+    
+    try {
+      const response = await fetch(`${API}/attachments/${file.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPreviewData(data);
+      }
+    } catch (error) {
+      console.error('Preview hover error:', error);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredFile(null);
+    setPreviewData(null);
+  };
+
   const handleDelete = async (attachment) => {
     if (!confirm('Are you sure you want to delete this file?')) return;
     
@@ -523,6 +551,167 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
     return '📎';
   };
 
+  const renderPreview = () => {
+    if (!hoveredFile || !previewData) return null;
+
+    const isImage = previewData.mime_type.startsWith('image/');
+    const isPDF = previewData.mime_type === 'application/pdf';
+    const isText = previewData.mime_type.startsWith('text/');
+
+    return (
+      <>
+        {/* Overlay pentru închiderea preview-ului */}
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 9999
+          }}
+          onClick={handleMouseLeave}
+        />
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          backgroundColor: 'var(--background-primary)',
+          border: '2px solid var(--accent-color)',
+          borderRadius: '8px',
+          padding: '16px',
+          maxWidth: '80vw',
+          maxHeight: '80vh',
+          overflow: 'auto',
+          zIndex: 10000,
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid var(--border-color)',
+            paddingBottom: '8px'
+          }}>
+            <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>
+              {hoveredFile.original_filename}
+            </h3>
+            <button
+              onClick={handleMouseLeave}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '20px',
+                cursor: 'pointer',
+                color: 'var(--text-secondary)'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {previewLoading ? (
+              <div style={{ textAlign: 'center', padding: '20px' }}>
+                Loading preview...
+              </div>
+            ) : isImage ? (
+              <img
+                src={`data:${previewData.mime_type};base64,${previewData.file_data}`}
+                alt={hoveredFile.original_filename}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '60vh',
+                  objectFit: 'contain'
+                }}
+              />
+            ) : isPDF ? (
+              <iframe
+                src={`data:${previewData.mime_type};base64,${previewData.file_data}`}
+                style={{
+                  width: '100%',
+                  height: '60vh',
+                  border: 'none'
+                }}
+                title={hoveredFile.original_filename}
+              />
+            ) : isText ? (
+              <pre style={{
+                backgroundColor: 'var(--background-secondary)',
+                padding: '12px',
+                borderRadius: '4px',
+                fontSize: '12px',
+                overflow: 'auto',
+                maxHeight: '60vh',
+                color: 'var(--text-primary)',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word'
+              }}>
+                {atob(previewData.file_data)}
+              </pre>
+            ) : (
+              <div style={{
+                textAlign: 'center',
+                padding: '20px',
+                color: 'var(--text-secondary)'
+              }}>
+                <div style={{ fontSize: '48px', marginBottom: '8px' }}>
+                  {getFileIcon(previewData.mime_type)}
+                </div>
+                <p>Preview not available for this file type</p>
+                <p style={{ fontSize: '12px' }}>
+                  {previewData.mime_type} • {(previewData.file_size / 1024 / 1024).toFixed(1)} MB
+                </p>
+              </div>
+            )}
+          </div>
+          
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            justifyContent: 'center',
+            borderTop: '1px solid var(--border-color)',
+            paddingTop: '8px'
+          }}>
+            <button
+              onClick={() => handleDownload(hoveredFile)}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: 'var(--accent-color)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              Download
+            </button>
+            <button
+              onClick={() => handlePreview(hoveredFile)}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: 'var(--background-secondary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px'
+              }}
+            >
+              Open Full
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  };
+
 
 
   if (loading) {
@@ -549,6 +738,7 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
 
   return (
     <div style={{ padding: '10px' }}>
+      {renderPreview()}
       <div style={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
@@ -573,16 +763,27 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
         overflowY: 'auto'
       }}>
         {files.map((file) => (
-          <div key={file.id} style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '8px 12px',
-            backgroundColor: 'var(--background-secondary)',
-            borderRadius: '6px',
-            fontSize: '13px',
-            border: '1px solid #eee'
-          }}>
+          <div 
+            key={file.id} 
+            onMouseEnter={() => handleMouseOver(file)}
+            onMouseLeave={handleMouseLeave}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              backgroundColor: 'var(--background-secondary)',
+              borderRadius: '6px',
+              fontSize: '13px',
+              border: '1px solid #eee',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              ':hover': {
+                backgroundColor: 'var(--accent-color)',
+                color: 'white'
+              }
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
               <span style={{ fontSize: '16px' }}>{getFileIcon(file.mime_type)}</span>
               <span style={{ 
