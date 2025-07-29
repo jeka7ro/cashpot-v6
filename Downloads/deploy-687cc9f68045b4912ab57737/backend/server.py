@@ -383,9 +383,11 @@ class Metrology(BaseModel):
     certificate_number: str
     certificate_type: str  # calibration, verification, certification
     issue_date: datetime
+    expiry_date: datetime
     issuing_authority: str
+    calibration_interval: int  # months
+    next_calibration_date: datetime
     cvt_expiry_date: Optional[datetime] = None  # CVT expiry date field
-    cvt_type: Optional[str] = None  # CVT type: periodic, reparation
     status: str = "active"  # active, expired, pending
     description: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -396,9 +398,10 @@ class MetrologyCreate(BaseModel):
     certificate_number: str
     certificate_type: str
     issue_date: datetime
+    expiry_date: datetime
     issuing_authority: str
+    calibration_interval: int
     cvt_expiry_date: Optional[datetime] = None  # CVT expiry date field
-    cvt_type: Optional[str] = None  # CVT type: periodic, reparation
     status: Optional[str] = "active"
     description: str
 
@@ -1463,8 +1466,12 @@ async def delete_legal_document(document_id: str, current_user: User = Depends(g
 # Metrology endpoints
 @api_router.post("/metrology", response_model=Metrology)
 async def create_metrology(metrology_data: MetrologyCreate, current_user: User = Depends(get_current_user)):
+    # Calculate next calibration date
+    next_calibration_date = metrology_data.issue_date + timedelta(days=metrology_data.calibration_interval * 30)
+    
     metrology = Metrology(
         **metrology_data.dict(),
+        next_calibration_date=next_calibration_date,
         created_by=current_user.id
     )
     
@@ -1492,7 +1499,11 @@ async def update_metrology(metrology_id: str, metrology_data: MetrologyCreate, c
     if not existing_metrology:
         raise HTTPException(status_code=404, detail="Metrology record not found")
     
+    # Calculate next calibration date
+    next_calibration_date = metrology_data.issue_date + timedelta(days=metrology_data.calibration_interval * 30)
+    
     update_data = metrology_data.dict()
+    update_data["next_calibration_date"] = next_calibration_date
     
     await db.metrology.update_one({"id": metrology_id}, {"$set": update_data})
     

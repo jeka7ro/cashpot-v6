@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import './app.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8002';
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 const API = `${BACKEND_URL}/api`;
 
 // Calendar Component
@@ -336,28 +336,45 @@ const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['appl
   };
 
   return (
-    <div className="file-upload-container">
-      <div
-        className={`file-upload ${dragOver ? 'drag-over' : ''}`}
+    <div style={{
+      display: 'inline-block',
+      position: 'relative'
+    }}>
+      <button
+        onClick={() => document.getElementById(`file-input-${entityId}`)?.click()}
         onDrop={handleDrop}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
-        onClick={() => document.getElementById(`file-input-${entityId}`)?.click()}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 16px',
+          backgroundColor: dragOver ? 'var(--accent-color)' : 'var(--background-secondary)',
+          color: dragOver ? 'white' : 'var(--text-primary)',
+          border: `2px dashed ${dragOver ? 'var(--accent-color)' : '#ddd'}`,
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '14px',
+          fontWeight: '500',
+          transition: 'all 0.2s ease',
+          minWidth: '120px',
+          justifyContent: 'center'
+        }}
+        title="Click to upload or drag files here"
       >
-        <div className="file-upload-placeholder">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
-          </svg>
-          <span>Click or drag to upload documents (PDF, Excel, Images)</span>
-          <small>Max size: {maxSizeMB}MB</small>
-        </div>
+        <span style={{ fontSize: '16px' }}>📎</span>
+        <span>Upload</span>
         {uploading && (
-          <div className="upload-overlay">
-            <div className="spinner"></div>
-            <span>Uploading...</span>
-          </div>
+          <span style={{ 
+            fontSize: '12px', 
+            marginLeft: '4px',
+            animation: 'pulse 1s infinite'
+          }}>
+            ...
+          </span>
         )}
-      </div>
+      </button>
       <input
         id={`file-input-${entityId}`}
         type="file"
@@ -416,19 +433,65 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
       });
       
       if (response.ok) {
-        const blob = await response.blob();
+        const data = await response.json();
+        
+        // Convert base64 to blob
+        const byteCharacters = atob(data.file_data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: data.mime_type });
+        
+        // Create download link
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = attachment.original_filename;
+        a.download = data.filename || attachment.original_filename;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
     } catch (error) {
       console.error('Download error:', error);
-      alert('Failed to download file');
+      alert('Failed to download file: ' + error.message);
+    }
+  };
+
+  const handlePreview = async (attachment) => {
+    try {
+      const response = await fetch(`${API}/attachments/${attachment.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Convert base64 to blob
+        const byteCharacters = atob(data.file_data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: data.mime_type });
+        
+        // Create preview URL
+        const url = window.URL.createObjectURL(blob);
+        // Deschide în tab nou pentru preview
+        window.open(url, '_blank');
+        // Nu revoke URL-ul imediat pentru că fișierul poate fi încă în tab
+        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Preview error:', error);
+      alert('Failed to preview file: ' + error.message);
     }
   };
 
@@ -460,35 +523,127 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
     return '📎';
   };
 
+
+
   if (loading) {
     return <div className="file-display-loading">Loading files...</div>;
   }
 
   if (files.length === 0) {
-    return <div className="file-display-empty">No files attached</div>;
+    return (
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '15px',
+        color: 'var(--text-secondary)',
+        fontSize: '14px'
+      }}>
+        <p style={{ marginBottom: '10px' }}>Nu sunt fișiere atașate</p>
+        <FileUpload
+          entityType={entityType}
+          entityId={entityId}
+          onFileUpload={() => refetch()}
+        />
+      </div>
+    );
   }
 
   return (
-    <div className="file-display">
-      <h4>Attached Files ({files.length})</h4>
-      <div className="file-list">
+    <div style={{ padding: '10px' }}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '12px',
+        fontSize: '14px',
+        fontWeight: '500',
+        color: 'var(--text-primary)'
+      }}>
+        <span>Fișiere ({files.length})</span>
+        <FileUpload
+          entityType={entityType}
+          entityId={entityId}
+          onFileUpload={() => refetch()}
+        />
+      </div>
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: '8px',
+        maxHeight: '200px',
+        overflowY: 'auto'
+      }}>
         {files.map((file) => (
-          <div key={file.id} className="file-item">
-            <span className="file-icon">{getFileIcon(file.mime_type)}</span>
-            <span className="file-name">{file.original_filename}</span>
-            <span className="file-size">({(file.file_size / 1024 / 1024).toFixed(2)} MB)</span>
-            <div className="file-actions">
+          <div key={file.id} style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            backgroundColor: 'var(--background-secondary)',
+            borderRadius: '6px',
+            fontSize: '13px',
+            border: '1px solid #eee'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+              <span style={{ fontSize: '16px' }}>{getFileIcon(file.mime_type)}</span>
+              <span style={{ 
+                fontWeight: '500', 
+                color: 'var(--text-primary)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '200px'
+              }}>
+                {file.original_filename}
+              </span>
+              <span style={{ 
+                color: 'var(--text-secondary)', 
+                fontSize: '11px',
+                whiteSpace: 'nowrap'
+              }}>
+                ({(file.file_size / 1024 / 1024).toFixed(1)} MB)
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: '4px' }}>
               <button 
-                className="btn-download" 
+                onClick={() => handlePreview(file)}
+                title="Preview"
+                style={{
+                  padding: '4px 6px',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  fontSize: '12px'
+                }}
+              >
+                👁️
+              </button>
+              <button 
                 onClick={() => handleDownload(file)}
                 title="Download"
+                style={{
+                  padding: '4px 6px',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  fontSize: '12px'
+                }}
               >
                 ⬇️
               </button>
               <button 
-                className="btn-delete" 
                 onClick={() => handleDelete(file)}
                 title="Delete"
+                style={{
+                  padding: '4px 6px',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#e74c3c'
+                }}
               >
                 🗑️
               </button>
@@ -497,6 +652,85 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
         ))}
       </div>
     </div>
+  );
+};
+
+
+
+// Component for displaying slot attachments count
+const AttachmentIndicator = ({ slotId, onClick }) => {
+  const [attachmentCount, setAttachmentCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const fetchAttachmentCount = async () => {
+    if (!slotId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`${API}/attachments/slots/${slotId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Fetched attachments for slot', slotId, ':', data);
+        // Filtrează doar documentele (nu avatarurile)
+        const documentAttachments = data.filter(att => 
+          !att.mime_type.startsWith('image/') || 
+          (!att.filename.includes('avatar') && !att.filename.includes('custom_avatar'))
+        );
+        console.log('Document attachments for slot', slotId, ':', documentAttachments);
+        setAttachmentCount(documentAttachments.length);
+      } else {
+        console.error('Failed to fetch attachments for slot', slotId, ':', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching slot attachments:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAttachmentCount();
+  }, [slotId]);
+
+  return (
+    <button 
+      className="btn-attachment"
+      title="Atașamente"
+      onClick={onClick}
+      style={{ 
+        fontSize: '14px', 
+        padding: '2px 4px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '24px',
+        height: '24px',
+        gap: '4px',
+        cursor: 'pointer',
+        border: 'none',
+        background: 'transparent'
+      }}
+    >
+      <span style={{fontSize:'1.1em'}}>📎</span>
+      {attachmentCount > 0 && (
+        <span style={{
+          backgroundColor: 'var(--accent-color)',
+          color: 'white',
+          borderRadius: '50%',
+          width: '16px',
+          height: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '0.7em',
+          fontWeight: 'bold',
+          minWidth: '16px'
+        }}>
+          {attachmentCount}
+        </span>
+      )}
+    </button>
   );
 };
 
@@ -1010,7 +1244,6 @@ const getEntityDisplayName = (type) => {
     onjn: 'ONJN Report',
     legal: 'Legal Document',
     users: 'User',
-    metrology: 'Metrology',
     jackpots: 'Jackpot'
   };
   return names[type] || type;
@@ -1044,8 +1277,8 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, l
       onjn: ['status'],
       legal: ['status'],
       users: ['role', 'is_active'],
-                       metrology: ['serial_number', 'certificate_number', 'certificate_type', 'issue_date', 'issuing_authority', 'cvt_type', 'cvt_expiry_date', 'status', 'description'],
-      jackpots: ['status', 'jackpot_type', 'current_amount']
+                 
+      jackpots: ['jackpot_type']
     };
     return commonFields[type] || ['status'];
   };
@@ -1112,95 +1345,6 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, l
           </div>
         );
       default:
-        // Handle metrology specific fields
-        if (entityType === 'metrology') {
-          switch (field) {
-            case 'serial_number':
-              return (
-                <div className="form-group" key={field}>
-                  <label>Serial Number</label>
-                  <select
-                    value={formData[field] || ''}
-                    onChange={(e) => handleChange(field, e.target.value)}
-                  >
-                    <option value="">Keep unchanged</option>
-                    {slotMachines && slotMachines.map(slot => (
-                      <option key={slot.serial_number} value={slot.serial_number}>
-                        {slot.serial_number} - {slot.model}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              );
-            case 'certificate_type':
-              return (
-                <div className="form-group" key={field}>
-                  <label>Certificate Type</label>
-                  <select
-                    value={formData[field] || ''}
-                    onChange={(e) => handleChange(field, e.target.value)}
-                  >
-                    <option value="">Keep unchanged</option>
-                    <option value="calibration">Calibration</option>
-                    <option value="verification">Verification</option>
-                    <option value="certification">Certification</option>
-                  </select>
-                </div>
-              );
-            case 'cvt_type':
-              return (
-                <div className="form-group" key={field}>
-                  <label>CVT Type</label>
-                  <select
-                    value={formData[field] || ''}
-                    onChange={(e) => handleChange(field, e.target.value)}
-                  >
-                    <option value="">Keep unchanged</option>
-                    <option value="periodic">Periodic</option>
-                    <option value="reparation">Reparation</option>
-                  </select>
-                </div>
-              );
-            case 'issue_date':
-            case 'cvt_expiry_date':
-              return (
-                <div className="form-group" key={field}>
-                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
-                  <Calendar
-                    value={formData[field] || ''}
-                    onChange={(date) => handleChange(field, date)}
-                    placeholder={`Select new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
-                  />
-                </div>
-              );
-
-            case 'description':
-              return (
-                <div className="form-group" key={field}>
-                  <label>Description</label>
-                  <textarea
-                    value={formData[field] || ''}
-                    onChange={(e) => handleChange(field, e.target.value)}
-                    placeholder="Enter new description (leave empty to keep unchanged)"
-                    rows="3"
-                  />
-                </div>
-              );
-            default:
-              return (
-                <div className="form-group" key={field}>
-                  <label>{field.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</label>
-                  <input
-                    type="text"
-                    value={formData[field] || ''}
-                    onChange={(e) => handleChange(field, e.target.value)}
-                    placeholder={`Enter new ${field.replace('_', ' ')} (leave empty to keep unchanged)`}
-                  />
-                </div>
-              );
-          }
-        }
-        
         // Handle slots specific fields
         if (entityType === 'slots') {
           switch (field) {
@@ -1411,10 +1555,8 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, l
       <div className="modal-content bulk-edit-modal">
         <h2>Bulk Edit {getEntityDisplayName(entityType)}</h2>
         <p>Editing {selectedItems.length} items. Only filled fields will be updated.</p>
-        
         <form onSubmit={handleSubmit} className="bulk-edit-form">
           {getCommonFields(entityType).map(field => renderField(field))}
-          
           <div className="form-actions">
             <button type="submit" className="btn-primary">
               Update {selectedItems.length} Items
@@ -1428,6 +1570,7 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, l
     </div>
   );
 };
+
 const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -1672,14 +1815,16 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         description: ''
       },
       jackpots: {
-        serial_number: '',
-        jackpot_type: 'progressive',
+        serial_numbers: '',
         jackpot_name: '',
-        current_amount: 0,
-        max_amount: 10000,
-        reset_amount: 100,
-        increment_rate: 0.1,
-        description: ''
+        jackpot_type: 'progressive',
+        increment_percentage: 0.1,
+        level_1: '',
+        level_2: '',
+        level_3: '',
+        level_4: '',
+        level_5: '',
+        details: ''
       }
     };
     return defaults[type] || {};
@@ -1937,7 +2082,9 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 <option value="">Select Manager</option>
                 {users.map(user => (
                   <option key={user.id} value={user.id}>
-                    {user.username} - {user.email}
+                    {user.first_name && user.last_name ? 
+                      `${user.first_name} ${user.last_name}` : 
+                      user.username} - {user.email}
                   </option>
                 ))}
               </select>
@@ -2446,7 +2593,7 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                   <FileUpload
                     entityType="slots"
                     entityId={entity.id}
-                    onFileUpload={() => fetchFiles && fetchFiles()}
+                    onFileUpload={() => {}}
                   />
                   <FileDisplay
                     entityType="slots"
@@ -2701,6 +2848,106 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 <FileDisplay entityType="metrology" entityId={entity.id} />
               </div>
             )}
+          </>
+        );
+
+      case 'jackpots':
+        return (
+          <>
+            <div className="form-group">
+              <label>Serial Numbers *</label>
+              <textarea
+                value={formData.serial_numbers || ''}
+                onChange={(e) => handleChange('serial_numbers', e.target.value)}
+                rows="3"
+                placeholder="Enter serial numbers separated by spaces or new lines"
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Jackpot Name *</label>
+              <input
+                type="text"
+                value={formData.jackpot_name || ''}
+                onChange={(e) => handleChange('jackpot_name', e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Jackpot Type *</label>
+              <select
+                value={formData.jackpot_type || 'progressive'}
+                onChange={(e) => handleChange('jackpot_type', e.target.value)}
+                required
+              >
+                <option value="progressive">Progressive</option>
+                <option value="mystery">Mystery</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Increment Percentage *</label>
+              <input
+                type="number"
+                step="0.1"
+                value={formData.increment_percentage || 0.1}
+                onChange={(e) => handleChange('increment_percentage', parseFloat(e.target.value))}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label>Level 1</label>
+              <input
+                type="text"
+                value={formData.level_1 || ''}
+                onChange={(e) => handleChange('level_1', e.target.value)}
+                placeholder="e.g., 111-222"
+              />
+            </div>
+            <div className="form-group">
+              <label>Level 2</label>
+              <input
+                type="text"
+                value={formData.level_2 || ''}
+                onChange={(e) => handleChange('level_2', e.target.value)}
+                placeholder="e.g., 222-333"
+              />
+            </div>
+            <div className="form-group">
+              <label>Level 3</label>
+              <input
+                type="text"
+                value={formData.level_3 || ''}
+                onChange={(e) => handleChange('level_3', e.target.value)}
+                placeholder="e.g., 333-555"
+              />
+            </div>
+            <div className="form-group">
+              <label>Level 4</label>
+              <input
+                type="text"
+                value={formData.level_4 || ''}
+                onChange={(e) => handleChange('level_4', e.target.value)}
+                placeholder="e.g., 555-888"
+              />
+            </div>
+            <div className="form-group">
+              <label>Level 5</label>
+              <input
+                type="text"
+                value={formData.level_5 || ''}
+                onChange={(e) => handleChange('level_5', e.target.value)}
+                placeholder="e.g., 888-999"
+              />
+            </div>
+            <div className="form-group">
+              <label>Details</label>
+              <textarea
+                value={formData.details || ''}
+                onChange={(e) => handleChange('details', e.target.value)}
+                rows="3"
+                placeholder="Additional details about the jackpot"
+              />
+            </div>
           </>
         );
 
@@ -3214,6 +3461,7 @@ const Dashboard = () => {
   const [invoices, setInvoices] = useState([]);
   const [onjnReports, setOnjnReports] = useState([]);
   const [legalDocuments, setLegalDocuments] = useState([]);
+
   const [metrology, setMetrology] = useState([]);
   const [jackpots, setJackpots] = useState([]);
   const [users, setUsers] = useState([]);
@@ -3259,6 +3507,16 @@ const Dashboard = () => {
   const [showInvoicePopup, setShowInvoicePopup] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showAddCvtDatePopup, setShowAddCvtDatePopup] = useState(false);
+  
+  // Jackpot popup state
+  const [selectedJackpots, setSelectedJackpots] = useState(null);
+  
+  // Invoice slots popup state
+  const [selectedInvoiceSlots, setSelectedInvoiceSlots] = useState(null);
+
+  // Slot attachments modal state
+  const [showSlotAttachmentsModal, setShowSlotAttachmentsModal] = useState(false);
+  const [selectedSlotId, setSelectedSlotId] = useState(null);
 
   // User avatar hook
   const { avatar } = useAvatar('users', user?.id);
@@ -3326,16 +3584,12 @@ const Dashboard = () => {
       setInvoices(invoicesData);
       setOnjnReports(onjnData);
       setLegalDocuments(legalData);
+
       setMetrology(metrologyData);
       setJackpots(jackpotsData);
       
-                    // Metrology data loaded
-      console.log('📊 Metrology data loaded:', metrologyData);
-      setUsers(usersData);
+                    setUsers(usersData);
       setCompaniesLocations(adminData);
-      
-      // Store metrology data globally for handleMetrologyDateChange function
-      window.metrologyData = metrologyData;
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
@@ -3391,83 +3645,7 @@ const Dashboard = () => {
   };
 
   // Funcția handleMetrologyDateChange pentru editarea datelor CVT
-  const handleMetrologyDateChange = async (serialNumber, newDate) => {
-    const token = localStorage.getItem('token');
-    
-    console.log('🔍 handleMetrologyDateChange called:', { serialNumber, newDate });
-    
-    // Caută dacă există deja o intrare metrology pentru acest serial
-    const existing = metrology.find(m => m.serial_number === serialNumber);
-    
-    console.log('📋 Existing metrology record:', existing);
-    
-    try {
-      if (existing) {
-        // Update
-        const updateData = { 
-          ...existing, 
-          cvt_expiry_date: newDate,
-          certificate_number: existing.certificate_number || 'CVT-' + serialNumber,
-          certificate_type: existing.certificate_type || 'calibration',
-          issue_date: existing.issue_date || newDate,
 
-          issuing_authority: existing.issuing_authority || 'ANM',
-
-          description: existing.description || 'CVT Certificate'
-        };
-        
-        console.log('📤 Sending PUT request with data:', updateData);
-        
-        const response = await fetch(`${API}/metrology/${existing.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(updateData),
-        });
-        
-        console.log('📥 Response status:', response.status);
-        
-        if (response.ok) {
-          console.log('✅ Update successful');
-          await fetchDashboardData();
-        } else {
-          const errorText = await response.text();
-          console.error('❌ Error updating metrology record:', response.status, errorText);
-        }
-      } else {
-        // Create
-        const createData = { 
-          serial_number: serialNumber, 
-          cvt_expiry_date: newDate,
-          certificate_number: 'CVT-' + serialNumber,
-          certificate_type: 'calibration',
-          issue_date: newDate,
-
-          issuing_authority: 'ANM',
-          description: 'CVT Certificate'
-        };
-        
-        console.log('📤 Sending POST request with data:', createData);
-        
-        const response = await fetch(`${API}/metrology`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(createData),
-        });
-        
-        console.log('📥 Response status:', response.status);
-        
-        if (response.ok) {
-          console.log('✅ Create successful');
-          await fetchDashboardData();
-        } else {
-          const errorText = await response.text();
-          console.error('❌ Error creating metrology record:', response.status, errorText);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error in handleMetrologyDateChange:', error);
-    }
-  };
 
   // Navigation items
   const navigationItems = [
@@ -3479,8 +3657,7 @@ const Dashboard = () => {
     { id: 'gamemixes', label: 'Game Mixes', icon: '🎲', count: gameMixes.length },
     { id: 'slots', label: 'Slots', icon: '🎯', count: slotMachines.filter(s => s.status !== 'inactive').length },
     { id: 'warehouse', label: 'Warehouse', icon: '📦', count: slotMachines.filter(s => s.status === 'inactive').length },
-    { id: 'metrology', label: 'Metrology', icon: '🔬', count: slotMachines.filter(s => s.status === 'active').length },
-    { id: 'metrology2', label: 'Metrology 2', icon: '🔧', count: metrology.length },
+            { id: 'metrology2', label: 'Metrology 2', icon: '🔬', count: metrology.length },
     { id: 'jackpots', label: 'Jackpots', icon: '🎰', count: jackpots.length },
     { id: 'invoices', label: 'Invoices', icon: '💰', count: invoices.length },
     { id: 'onjn', label: 'ONJN Reports', icon: '📋', count: onjnReports.length },
@@ -4110,6 +4287,24 @@ const Dashboard = () => {
   const handleCloseAddCvtDatePopup = () => {
     setShowAddCvtDatePopup(false);
   };
+  
+  const handleCloseJackpotPopup = () => {
+    setSelectedJackpots(null);
+  };
+  
+  const handleCloseInvoiceSlotsPopup = () => {
+    setSelectedInvoiceSlots(null);
+  };
+
+  const handleOpenSlotAttachments = (slotId) => {
+    setSelectedSlotId(slotId);
+    setShowSlotAttachmentsModal(true);
+  };
+
+  const handleCloseSlotAttachments = () => {
+    setShowSlotAttachmentsModal(false);
+    setSelectedSlotId(null);
+  };
 
   const renderTable = (title, data, columns, actions, entityType) => {
     // Apply search filter
@@ -4151,26 +4346,26 @@ const Dashboard = () => {
       if (selectedPlacesFilter) {
         filteredData = filteredData.filter(slot => slot.gaming_places === selectedPlacesFilter);
       }
-      if (selectedCvtDateFilter) {
-        filteredData = filteredData.filter(slot => {
-          // Find metrology record for this slot
-          const metrologyItem = metrology.find(m => {
-            if (!m.serial_number) return false;
-            
-            // Try both newline and space separation
-            const serialNumbersNewline = m.serial_number.split('\n').filter(s => s.trim());
-            const serialNumbersSpace = m.serial_number.split(' ').filter(s => s.trim());
-            
-            // Use the one that has more items (more likely to be correct)
-            const serialNumbers = serialNumbersNewline.length > serialNumbersSpace.length ? 
-              serialNumbersNewline : serialNumbersSpace;
-            
-            return serialNumbers.includes(slot.serial_number);
-          });
-          
-          return metrologyItem?.cvt_expiry_date === selectedCvtDateFilter;
-        });
-      }
+                      if (selectedCvtDateFilter) {
+                  filteredData = filteredData.filter(slot => {
+                    // Find metrology record for this slot
+                    const metrologyItem = metrology.find(m => {
+                      if (!m.serial_number) return false;
+                      
+                      // Try both newline and space separation
+                      const serialNumbersNewline = m.serial_number.split('\n').filter(s => s.trim());
+                      const serialNumbersSpace = m.serial_number.split(' ').filter(s => s.trim());
+                      
+                      // Use the one that has more items (more likely to be correct)
+                      const serialNumbers = serialNumbersNewline.length > serialNumbersSpace.length ? 
+                        serialNumbersNewline : serialNumbersSpace;
+                      
+                      return serialNumbers.includes(slot.serial_number);
+                    });
+                    
+                    return metrologyItem?.cvt_expiry_date === selectedCvtDateFilter;
+                  });
+                }
     }
     
     return (
@@ -4249,7 +4444,7 @@ const Dashboard = () => {
                 onClick={() => toggleProviderAvatarFilter(provider.id)}
                 title={`Filter by ${provider.name}`}
               >
-                <AvatarDisplay entityType="providers" entityId={provider.id} size={50} />
+                <AvatarDisplay entityType="providers" entityId={provider.id} size={30} />
               </div>
             ))}
           </div>
@@ -4365,12 +4560,23 @@ const Dashboard = () => {
                       {entityType === 'slots' || entityType === 'metrology' ? (
                         <div className="table-row-actions-vertical">
                           {/* First row: Edit, Delete, and Attach buttons */}
-                          <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                          <div style={{ display: 'flex', gap: '4px', marginBottom: '4px', alignItems: 'center' }}>
                             <button 
                               className="btn-edit"
                               onClick={() => actions?.onEdit && actions.onEdit(item)}
                               title="Edit"
-                              style={{ fontSize: '14px', padding: '2px 4px' }}
+                              style={{ 
+                                fontSize: '14px', 
+                                padding: '2px 4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '24px',
+                                height: '24px',
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: 'pointer'
+                              }}
                             >
                               📝
                             </button>
@@ -4382,13 +4588,23 @@ const Dashboard = () => {
                                 handleDeleteEntity(item.id, entityType);
                               }}
                               title="Delete"
-                              style={{ fontSize: '14px', padding: '2px 4px' }}
+                              style={{ 
+                                fontSize: '14px', 
+                                padding: '2px 4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '24px',
+                                height: '24px',
+                                border: 'none',
+                                background: 'transparent',
+                                cursor: 'pointer'
+                              }}
                             >
                               🗑️
                             </button>
-                            <span style={{fontSize:'1.1em',cursor:'pointer'}} title="Atașamente">
-                              📎
-                            </span>
+                            {/* Attachment indicator with count */}
+                            <AttachmentIndicator slotId={item.id} onClick={() => handleOpenSlotAttachments(item.id)} />
                           </div>
                           {/* Second row: Status toggle (only for slots and warehouse) */}
                           {(entityType === 'slots' || entityType === 'warehouse') && (
@@ -4451,9 +4667,16 @@ const Dashboard = () => {
                         >
                             🗑️
                         </button>
-                          <span style={{fontSize:'1.1em',cursor:'pointer'}} title="Atașamente">
-                            📎
-                          </span>
+                          {/* Attachment indicator with count */}
+                          <div style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '4px',
+                            cursor: 'pointer'
+                          }} title="Atașamente">
+                            <span style={{fontSize:'1.1em'}}>🔗</span>
+                            {/* Attachment count will be displayed when data is available */}
+                          </div>
                       </div>
                       )}
                     </td>
@@ -4680,9 +4903,176 @@ const Dashboard = () => {
               </div>
               <div className="invoice-field">
                 <label>Created At:</label>
-                <span>{new Date(invoice.created_at).toLocaleString()}</span>
+                <span>{invoice.created_at ? new Date(invoice.created_at).toLocaleString() : 'N/A'}</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Jackpot Popup Component
+  const JackpotPopup = ({ jackpots, onClose }) => {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>Jackpot Details</h2>
+            <button className="modal-close" onClick={onClose}>×</button>
+          </div>
+          <div className="modal-body">
+            {jackpots.map((jackpot, index) => (
+              <div key={jackpot.id} className="jackpot-item">
+                <div className="jackpot-header">
+                  <h3>{jackpot.jackpot_name || 'No Name'}</h3>
+                  <span className={`jackpot-type ${jackpot.jackpot_type?.toLowerCase()}`}>
+                    {jackpot.jackpot_type || 'Unknown'}
+                  </span>
+                </div>
+                
+                <div className="jackpot-details">
+                  <div>
+                    <div className="detail-label">Serial Numbers</div>
+                    <div className="detail-value">{jackpot.serial_numbers || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Increment Percentage</div>
+                    <div className="detail-value">
+                      {typeof jackpot.increment_percentage === 'number' ? `${jackpot.increment_percentage}%` : 'N/A'}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Level 1</div>
+                    <div className="detail-value">{jackpot.level_1 || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Level 2</div>
+                    <div className="detail-value">{jackpot.level_2 || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Level 3</div>
+                    <div className="detail-value">{jackpot.level_3 || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Level 4</div>
+                    <div className="detail-value">{jackpot.level_4 || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Level 5</div>
+                    <div className="detail-value">{jackpot.level_5 || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Created Date</div>
+                    <div className="detail-value">
+                      {jackpot.created_at ? new Date(jackpot.created_at).toLocaleDateString() : 'N/A'}
+                    </div>
+                  </div>
+                </div>
+                
+                {(jackpot.description || jackpot.details) && (
+                  <div className="jackpot-description">
+                    <div className="detail-label">Description</div>
+                    <div className="detail-value">{jackpot.description || jackpot.details}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  // Invoice Slots Popup Component
+  const InvoiceSlotsPopup = ({ slots, onClose }) => {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>Invoice Slot Details</h2>
+            <button className="modal-close" onClick={onClose}>×</button>
+          </div>
+          <div className="modal-body">
+            {slots.map((slot, index) => (
+              <div key={slot.id} className="jackpot-item">
+                <div className="jackpot-header">
+                  <h3>Slot: {slot.serial_number || 'Unknown Serial'}</h3>
+                  <span className={`jackpot-type ${slot.status?.toLowerCase()}`}>
+                    {slot.status || 'Unknown Status'}
+                  </span>
+                </div>
+                
+                <div className="jackpot-details">
+                  <div>
+                    <div className="detail-label">Provider</div>
+                    <div className="detail-value">
+                      {(() => {
+                        const provider = providers.find(p => p.id === slot.provider_id);
+                        return provider ? provider.name : 'Unknown Provider';
+                      })()}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Location</div>
+                    <div className="detail-value">
+                      {(() => {
+                        const location = locations.find(l => l.id === slot.location_id);
+                        return location ? location.name : 'Unknown Location';
+                      })()}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Game Mix</div>
+                    <div className="detail-value">
+                      {(() => {
+                        const gameMix = gameMixes.find(gm => gm.id === slot.game_mix_id);
+                        return gameMix ? gameMix.name : 'Unknown Game Mix';
+                      })()}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Cabinet</div>
+                    <div className="detail-value">
+                      {(() => {
+                        const cabinet = cabinets.find(c => c.id === slot.cabinet_id);
+                        return cabinet ? cabinet.name : 'Unknown Cabinet';
+                      })()}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Production Year</div>
+                    <div className="detail-value">{slot.production_year || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">RTP</div>
+                    <div className="detail-value">{slot.rtp ? `${slot.rtp}%` : 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Max Bet</div>
+                    <div className="detail-value">{slot.max_bet || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Denomination</div>
+                    <div className="detail-value">{slot.denomination || 'N/A'}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -5749,6 +6139,36 @@ const Dashboard = () => {
                       🏭 {item.production_year}
                     </small>
                   )}
+                  {/* Afișează facturile asociate */}
+                  {(() => {
+                    const associatedInvoices = invoices.filter(inv => 
+                      inv.serial_numbers && inv.serial_numbers.includes(item.serial_number)
+                    );
+                    if (associatedInvoices.length > 0) {
+                      return (
+                        <div style={{ marginTop: '4px' }}>
+                          {associatedInvoices.map((invoice, index) => (
+                            <small 
+                              key={invoice.id}
+                              className={`clickable-filter ${selectedInvoiceFilter === invoice.invoice_number ? 'active-filter' : ''}`}
+                              onClick={() => toggleInvoiceFilter(invoice.invoice_number)}
+                              style={{ 
+                                display: 'block', 
+                                marginTop: '2px', 
+                                color: 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                fontSize: '0.8em'
+                              }}
+                              title={`Click to filter by invoice: ${invoice.invoice_number}`}
+                            >
+                              📄 {invoice.invoice_number}
+                            </small>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
 
                 </div>
               </div>
@@ -5771,8 +6191,38 @@ const Dashboard = () => {
                   {item.production_year && (
                     <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
                       🏭 {item.production_year}
-                      </small>
+                    </small>
                   )}
+                  {/* Afișează facturile asociate */}
+                  {(() => {
+                    const associatedInvoices = invoices.filter(inv => 
+                      inv.serial_numbers && inv.serial_numbers.includes(item.serial_number)
+                    );
+                    if (associatedInvoices.length > 0) {
+                      return (
+                        <div style={{ marginTop: '4px' }}>
+                          {associatedInvoices.map((invoice, index) => (
+                            <small 
+                              key={invoice.id}
+                              className={`clickable-filter ${selectedInvoiceFilter === invoice.invoice_number ? 'active-filter' : ''}`}
+                              onClick={() => toggleInvoiceFilter(invoice.invoice_number)}
+                              style={{ 
+                                display: 'block', 
+                                marginTop: '2px', 
+                                color: 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                fontSize: '0.8em'
+                              }}
+                              title={`Click to filter by invoice: ${invoice.invoice_number}`}
+                            >
+                              📄 {invoice.invoice_number}
+                            </small>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                     </div>
                   </div>
                 );
@@ -5826,6 +6276,36 @@ const Dashboard = () => {
                     🏭 {item.production_year}
                   </small>
                 )}
+                {/* Afișează facturile asociate */}
+                {(() => {
+                  const associatedInvoices = invoices.filter(inv => 
+                    inv.serial_numbers && inv.serial_numbers.includes(item.serial_number)
+                  );
+                  if (associatedInvoices.length > 0) {
+                    return (
+                      <div style={{ marginTop: '4px' }}>
+                        {associatedInvoices.map((invoice, index) => (
+                          <small 
+                            key={invoice.id}
+                            className={`clickable-filter ${selectedInvoiceFilter === invoice.invoice_number ? 'active-filter' : ''}`}
+                            onClick={() => toggleInvoiceFilter(invoice.invoice_number)}
+                            style={{ 
+                              display: 'block', 
+                              marginTop: '2px', 
+                              color: 'var(--text-secondary)',
+                              cursor: 'pointer',
+                              fontSize: '0.8em'
+                            }}
+                            title={`Click to filter by invoice: ${invoice.invoice_number}`}
+                          >
+                            📄 {invoice.invoice_number}
+                          </small>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
                 </div>
               );
@@ -5881,35 +6361,35 @@ const Dashboard = () => {
             }
       },
       // Add CVT Information column to slot machines table
-      {
-        key: 'cvt_information',
-        label: 'CVT Information',
-        render: (item) => {
-          // Find metrology record for this slot with proper multi-serial handling
-          const metrologyItem = metrology.find(m => {
-            if (!m.serial_number) {
-              return false;
-            }
-            
-            // Try both newline and space separation
-            const serialNumbersNewline = m.serial_number.split('\n').filter(s => s.trim());
-            const serialNumbersSpace = m.serial_number.split(' ').filter(s => s.trim());
-            
-            // Use the one that has more items (more likely to be correct)
-            const serialNumbers = serialNumbersNewline.length > serialNumbersSpace.length ? 
-              serialNumbersNewline : serialNumbersSpace;
-            
-            return serialNumbers.includes(item.serial_number);
-          });
-          
-          const cvtDate = metrologyItem?.cvt_expiry_date;
-          const cvtType = metrologyItem?.cvt_type;
-          
-          if (!cvtDate && !cvtType) {
-            return <span style={{ color: '#6b7280', fontStyle: 'italic' }}>No CVT Data</span>;
-          }
-          
-          // Calculate days remaining
+                {
+            key: 'cvt_information',
+            label: 'CVT Information',
+            render: (item) => {
+              // Find metrology record for this slot with proper multi-serial handling
+              const metrologyItem = metrology.find(m => {
+                if (!m.serial_number) {
+                  return false;
+                }
+                
+                // Try both newline and space separation
+                const serialNumbersNewline = m.serial_number.split('\n').filter(s => s.trim());
+                const serialNumbersSpace = m.serial_number.split(' ').filter(s => s.trim());
+                
+                // Use the one that has more items (more likely to be correct)
+                const serialNumbers = serialNumbersNewline.length > serialNumbersSpace.length ? 
+                  serialNumbersNewline : serialNumbersSpace;
+                
+                return serialNumbers.includes(item.serial_number);
+              });
+              
+              const cvtDate = metrologyItem?.cvt_expiry_date;
+              const cvtType = metrologyItem?.cvt_type;
+              
+              if (!cvtDate && !cvtType) {
+                return <span style={{ color: '#6b7280', fontStyle: 'italic' }}>No CVT Data</span>;
+              }
+              
+              // Calculate days remaining
           let daysLeft = null;
           if (cvtDate) {
             const cvtExpiryDate = new Date(cvtDate);
@@ -5995,7 +6475,50 @@ const Dashboard = () => {
             </div>
           );
         }
-      }
+      },
+      {
+        key: 'jackpots',
+        label: 'Jackpots',
+        render: (item) => {
+          // Caută toate jackpoturile care conțin serialul slotului
+          const associatedJackpots = jackpots.filter(jp => {
+            if (!jp.serial_numbers) return false;
+            // Acceptă delimitare cu spațiu sau newline
+            const serials = jp.serial_numbers.split(/\s|\n/).filter(s => s.trim());
+            return serials.includes(item.serial_number);
+          });
+          
+          if (associatedJackpots.length === 0) {
+            return <span style={{ color: '#aaa', fontStyle: 'italic' }}>No Jackpot</span>;
+          }
+          
+          // Dacă este un singur jackpot, afișează doar numele
+          if (associatedJackpots.length === 1) {
+            return (
+              <span style={{ 
+                color: '#007bff', 
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                fontWeight: '500'
+              }} onClick={() => setSelectedJackpots(associatedJackpots)}>
+                {associatedJackpots[0].jackpot_name || 'No Name'}
+              </span>
+            );
+          }
+          
+          // Dacă sunt multiple jackpots, afișează "Multiple Jackpots" clicabil
+          return (
+            <span style={{ 
+              color: '#007bff', 
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              fontWeight: '500'
+            }} onClick={() => setSelectedJackpots(associatedJackpots)}>
+              Multiple Jackpots ({associatedJackpots.length})
+            </span>
+          );
+        }
+      },
     ];
 
     switch (activeView) {
@@ -6191,141 +6714,20 @@ const Dashboard = () => {
         }, 'slots');
       }
       case 'metrology': {
-        // Fiecare rând = un slot ACTIV din slotMachines
-        const metrologyRows = slotMachines
-          .filter(slot => slot.status === 'active') // Doar sloturi active
-          .map(slot => {
-            // Găsește metrologia asociată slotului (după serial_number)
-            const metrologyItem = metrology.find(m => m.serial_number === slot.serial_number) || {};
-            // Calculează zile rămase până la expirarea CVT-ului
-            // cvt_expiry_date este data când expiră CVT-ul
-            let daysLeft = '';
-            if (metrologyItem.cvt_expiry_date) {
-              // Data când expiră CVT-ul
-              const cvtExpiryDate = new Date(metrologyItem.cvt_expiry_date);
-              const now = new Date();
-              const diff = Math.floor((cvtExpiryDate - now) / (1000 * 60 * 60 * 24));
-              daysLeft = diff > 0 ? diff : 0;
-              
-              console.log('🔍 CVT Expiry calculation:', {
-                serialNumber: slot.serial_number,
-                cvtExpiryDate: metrologyItem.cvt_expiry_date,
-                cvtExpiryDateObj: cvtExpiryDate,
-                now: now,
-                daysRemaining: daysLeft,
-                note: 'cvt_expiry_date is the expiry date of CVT'
-              });
-            } else {
-              // Dacă nu există cvt_expiry_date, nu se poate calcula
-              daysLeft = '';
-              console.log('⚠️ No CVT expiry date available for:', slot.serial_number);
-            }
-            return {
-              ...slot,
-              cvt_expiry_date: metrologyItem.cvt_expiry_date || '',
-              cvt_file: metrologyItem.cvt_file || null,
-              days_left: daysLeft,
-              metrology_id: metrologyItem.id || null,
-            };
-          });
-
-        const metrologyColumns = [
-            {
-              key: 'serial_number',
-              label: 'Serial Number',
-              render: (item) => {
-                const location = locations.find(l => l.id === item.location_id);
-                return (
-                <div className="serial-cell" style={{ maxWidth: '120px' }}>
-                    <div 
-                      className={`serial-primary clickable-filter ${selectedSerialFilter === item.serial_number ? 'active-filter' : ''}`}
-                      onClick={() => toggleSerialFilter(item.serial_number)}
-                    style={{ cursor: 'pointer', fontSize: '0.9em' }}
-                    >
-                      <strong>{item.serial_number || 'N/A'}</strong>
-                    </div>
-                    <div className="serial-secondary">
-                      <small 
-                        className={`location-info clickable-filter ${selectedLocationFilter === item.location_id ? 'active-filter' : ''}`}
-                        onClick={() => toggleLocationFilter(item.location_id)}
-                      style={{ fontSize: '0.8em' }}
-                      >
-                        {location ? location.name : 'N/A'}
-                      </small>
-                    </div>
-                  </div>
-                );
-              }
-            },
-          { 
-            key: 'provider_id', 
-            label: 'Provider', 
-            render: (item) => {
-                const provider = providers.find(p => p.id === item.provider_id);
-                const cabinet = cabinets.find(c => c.id === item.cabinet_id);
-                return (
-                  <div>
-                    <div 
-                      className={`clickable-filter ${selectedProviderFilter === item.provider_id ? 'active-filter' : ''}`}
-                      onClick={() => toggleProviderFilter(item.provider_id)}
-                      style={{ cursor: 'pointer', fontWeight: 'bold' }}
-                    >
-                      {provider ? provider.name : 'N/A'}
-                    </div>
-                    <div
-                      className={`clickable-filter ${selectedCabinetFilter === item.cabinet_id ? 'active-filter' : ''}`}
-                      onClick={() => toggleCabinetFilter(item.cabinet_id)}
-                      style={{ fontSize: 12, cursor: 'pointer' }}
-                    >
-                      {cabinet ? cabinet.name : 'No Cabinet'}
-                    </div>
-                  </div>
-                );
-            }
-          },
-            {
-              key: 'game_mix_id',
-              label: 'Game Mix',
-              render: (item) => {
-                const gameMix = gameMixes.find(gm => gm.id === item.game_mix_id);
-                const cabinet = cabinets.find(c => c.id === item.cabinet_id);
-                return (
-                  <div>
-                    <div 
-                      className={`clickable-filter ${selectedGameMixFilter === item.game_mix_id ? 'active-filter' : ''}`}
-                      onClick={() => toggleGameMixFilter(item.game_mix_id)}
-                      style={{ cursor: 'pointer', fontWeight: 'bold' }}
-                    >
-                      {gameMix ? gameMix.name : 'N/A'}
-                    </div>
-                    <div 
-                      className={`clickable-filter ${selectedCabinetFilter === item.cabinet_id ? 'active-filter' : ''}`}
-                      onClick={() => toggleCabinetFilter(item.cabinet_id)}
-                      style={{ fontSize: 12, cursor: 'pointer' }}
-                    >
-                      {cabinet && cabinet.model ? cabinet.model : 'No Model'}
-                    </div>
-                  </div>
-                );
-              }
-            },
-          { 
-            key: 'commission_date',
-            label: 'Data Licenței',
-            render: (item) => item.commission_date ? new Date(item.commission_date).toLocaleDateString() : '-'
-          },
-
-        ];
-
-        return renderTable('Metrologie', metrologyRows, metrologyColumns, {
-          onAdd: () => handleAddEntity('metrology'),
-          onEdit: (item) => handleEditEntity(item, 'metrology'),
-          onDelete: (id) => handleDeleteEntity(id, 'metrology'),
-          onBulkEdit: () => handleBulkEdit('metrology'),
-          onBulkDelete: () => handleBulkDelete('metrology'),
-          onExport: () => handleExport('metrology'),
-          onImport: () => handleImport('metrology')
-        }, 'metrology');
+        // REDIRECT TO METROLOGY 2 - THE ONLY CORRECT METROLOGY TABLE
+        return (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+            <h3>⚠️ Metrology Table Deprecated</h3>
+            <p>This table has been replaced by Metrology 2. Please use the Metrology 2 section instead.</p>
+            <button 
+              className="btn-primary"
+              onClick={() => setActiveView('metrology2')}
+              style={{ marginTop: '20px' }}
+            >
+              Go to Metrology 2
+            </button>
+          </div>
+        );
       }
       case 'metrology2': {
         const selectedMetrologyItems = selectedItems.filter(id => metrology.some(item => item.id === id));
@@ -6484,9 +6886,15 @@ const Dashboard = () => {
                               entityType="users" 
                               entityId={item.created_by} 
                               size={24} 
-                              entityName={createdByUser?.username || 'Unknown User'}
+                              entityName={createdByUser?.first_name && createdByUser?.last_name ? 
+                                `${createdByUser.first_name} ${createdByUser.last_name}` : 
+                                createdByUser?.username || 'Unknown User'}
                             />
-                            <span>{createdByUser?.username || 'Unknown User'}</span>
+                            <span>
+                              {createdByUser?.first_name && createdByUser?.last_name ? 
+                                `${createdByUser.first_name} ${createdByUser.last_name}` : 
+                                createdByUser?.username || 'Unknown User'}
+                            </span>
                           </div>
                         </td>
                         <td>
@@ -6523,60 +6931,95 @@ const Dashboard = () => {
           </div>
         );
       }
-      case 'jackpots': {
-        return renderTable('Jackpot Records', jackpots, [
-          { key: 'serial_number', label: 'Serial Number', render: (item) => (
-            <div className="serial-cell">
-                    <div 
-                className={`serial-primary clickable-filter ${selectedSerialFilter === item.serial_number ? 'active-filter' : ''}`}
-                onClick={() => toggleSerialFilter(item.serial_number)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                <strong>{item.serial_number || 'N/A'}</strong>
-                    </div>
-                    </div>
-          )},
-          { key: 'jackpot_name', label: 'Jackpot Name' },
-          { key: 'jackpot_type', label: 'Type', render: (item) => {
-            const typeColors = {
-              'progressive': '📈',
-              'fixed': '💰',
-              'mystery': '🎭'
-            };
-              return (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {typeColors[item.jackpot_type] || '🎰'} {item.jackpot_type}
-              </span>
+              case 'jackpots': {
+          return renderTable('Jackpot Records', jackpots, [
+            { key: 'slot_count', label: 'NUMBER OF SLOTS', render: (item) => {
+              if (!item.serial_numbers) return (
+                <span style={{ 
+                  backgroundColor: 'var(--accent-color)', 
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.9em',
+                  fontWeight: 'bold'
+                }}>
+                  0 slots
+                </span>
               );
-          }},
-          { key: 'current_amount', label: 'Current Amount', render: (item) => `€${item.current_amount.toLocaleString()}` },
-          { key: 'max_amount', label: 'Max Amount', render: (item) => `€${item.max_amount.toLocaleString()}` },
-          { key: 'reset_amount', label: 'Reset Amount', render: (item) => `€${item.reset_amount.toLocaleString()}` },
-          { key: 'increment_rate', label: 'Increment Rate', render: (item) => `${item.increment_rate}%` },
-          { key: 'last_reset_date', label: 'Last Reset', render: (item) => new Date(item.last_reset_date).toLocaleDateString() },
-          { key: 'status', label: 'Status', render: (item) => {
-            const statusColors = {
-              'active': '🟢',
-              'inactive': '🔴',
-              'won': '🏆'
-            };
+              const serials = item.serial_numbers.split(/\s|\n/).filter(s => s.trim());
               return (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {statusColors[item.status] || '⚪'} {item.status}
-                    </span>
-            );
-          }},
-          { key: 'description', label: 'Description' }
-        ], { 
-          onAdd: () => handleAddEntity('jackpots'),
-          onEdit: (item) => handleEditEntity(item, 'jackpots'),
-          onDelete: (id) => handleDeleteEntity(id, 'jackpots'),
-          onBulkEdit: () => handleBulkEdit('jackpots'),
-          onBulkDelete: () => handleBulkDelete('jackpots'),
-          onExport: () => handleExport('jackpots'),
-          onImport: () => handleImport('jackpots')
-        }, 'jackpots');
-      }
+                <span style={{ 
+                  backgroundColor: 'var(--accent-color)', 
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.9em',
+                  fontWeight: 'bold'
+                }}>
+                  {serials.length} slots
+                </span>
+              );
+            }},
+            { key: 'jackpot_name', label: 'Jackpot Name', render: (item) => (
+              <span 
+                style={{ 
+                  color: '#007bff', 
+                  cursor: 'pointer', 
+                  textDecoration: 'underline',
+                  fontWeight: '500'
+                }} 
+                onClick={() => setSelectedJackpots([item])}
+              >
+                {item.jackpot_name || 'No Name'}
+              </span>
+            )},
+            { key: 'jackpot_type', label: 'Type', render: (item) => {
+              const typeColors = {
+                'Progressive': '📈',
+                'Fixed': '💰',
+                'Mystery': '🎭'
+              };
+              return (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {typeColors[item.jackpot_type] || '🎰'} {item.jackpot_type}
+                </span>
+              );
+            }},
+            { key: 'levels', label: 'Levels', render: (item) => {
+              const levels = [item.level_1, item.level_2, item.level_3, item.level_4, item.level_5];
+              const validLevels = levels.filter(level => level !== null && level !== undefined && level !== '');
+              if (validLevels.length === 0) return 'N/A';
+              
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  {validLevels.map((level, index) => (
+                    <div key={index} style={{ 
+                      padding: '2px 6px', 
+                      background: 'var(--glass-bg)', 
+                      borderRadius: '3px',
+                      fontSize: '11px',
+                      fontWeight: '400',
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border-color)'
+                    }}>
+                      Level {index + 1}: {level}
+                    </div>
+                  ))}
+                </div>
+              );
+            }},
+            { key: 'increment_percentage', label: 'Increment Rate', render: (item) => typeof item.increment_percentage === 'number' ? `${item.increment_percentage}%` : 'N/A' },
+            { key: 'details', label: 'Description', render: (item) => item.details || 'N/A' }
+          ], { 
+            onAdd: () => handleAddEntity('jackpots'),
+            onEdit: (item) => handleEditEntity(item, 'jackpots'),
+            onDelete: (id) => handleDeleteEntity(id, 'jackpots'),
+            onBulkEdit: () => handleBulkEdit('jackpots'),
+            onBulkDelete: () => handleBulkDelete('jackpots'),
+            onExport: () => handleExport('jackpots'),
+            onImport: () => handleImport('jackpots')
+          }, 'jackpots');
+        }
       case 'gamemixes':
         return renderTable('Game Mixes', gameMixes, [
           {
@@ -6734,11 +7177,6 @@ const Dashboard = () => {
             }
           },
           { 
-            key: 'currency', 
-            label: 'Currency',
-            render: (item) => item.currency || 'EUR'
-          },
-          { 
             key: 'status', 
             label: 'Status',
             render: (item) => {
@@ -6760,23 +7198,44 @@ const Dashboard = () => {
               );
             }
           },
+
           { 
-            key: 'serial_numbers', 
-            label: 'Serial Numbers',
+            key: 'slot_count', 
+            label: 'NUMBER OF SLOTS', 
             render: (item) => {
-              if (!item.serial_numbers) {
-                return 'No serial numbers';
-              }
-              // Handle serial_numbers as a string (space-separated values)
-              const serialArray = item.serial_numbers.split(' ').filter(s => s.trim());
-              if (serialArray.length === 0) {
-                return 'No serial numbers';
-              }
+              if (!item.serial_numbers) return (
+                <span style={{ 
+                  backgroundColor: 'var(--accent-color)', 
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.9em',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }} onClick={() => setSelectedInvoiceSlots([])}>
+                  0 slots
+                </span>
+              );
+              const serials = item.serial_numbers.split(/\s|\n/).filter(s => s.trim());
+              const associatedSlots = slotMachines.filter(slot => 
+                serials.includes(slot.serial_number)
+              );
               return (
-                <div style={{ maxWidth: '200px' }}>
-                  {serialArray.slice(0, 3).join(', ')}
-                  {serialArray.length > 3 && ` +${serialArray.length - 3} more`}
-                </div>
+                <span 
+                  style={{ 
+                    backgroundColor: 'var(--accent-color)', 
+                    color: 'white',
+                    padding: '4px 8px',
+                    borderRadius: '12px',
+                    fontSize: '0.9em',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }} 
+                  onClick={() => setSelectedInvoiceSlots(associatedSlots)}
+                  title="Click to view slot details"
+                >
+                  {serials.length} slots
+                </span>
               );
             }
           },
@@ -6864,14 +7323,14 @@ const Dashboard = () => {
           },
           { 
             key: 'username', 
-            label: 'Username',
+            label: 'Name',
             render: (item) => (
               <div>
                 <div style={{ fontWeight: 'bold' }}>
-                  {item.username || 'N/A'}
+                  {item.first_name && item.last_name ? `${item.first_name} ${item.last_name}` : item.username || 'N/A'}
                 </div>
                 <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
-                  {item.first_name && item.last_name ? `${item.first_name} ${item.last_name}` : 'No name set'}
+                  {item.username || 'No username'}
                 </div>
               </div>
             )
@@ -7096,6 +7555,34 @@ const Dashboard = () => {
             onClose={handleCloseAddCvtDatePopup} 
           />
         )}
+        
+        {/* Jackpot Popup Modal */}
+                {selectedJackpots && (
+          <JackpotPopup 
+            jackpots={selectedJackpots}
+            onClose={handleCloseJackpotPopup}
+          />
+        )}
+        
+        {selectedInvoiceSlots && (
+          <InvoiceSlotsPopup 
+            slots={selectedInvoiceSlots}
+            onClose={handleCloseInvoiceSlotsPopup}
+          />
+        )}
+
+        {/* Slot Attachments Modal */}
+        {showSlotAttachmentsModal && selectedSlotId && (
+          <div className="modal-backdrop" onClick={handleCloseSlotAttachments}>
+            <div className="modal-content" style={{ maxWidth: 500, margin: '10vh auto', position: 'relative' }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Atașamente Slot</h2>
+                <button className="modal-close" onClick={handleCloseSlotAttachments}>&times;</button>
+              </div>
+              <FileDisplay entityType="slots" entityId={selectedSlotId} />
+            </div>
+          </div>
+        )}
     </div>
   );
 };
@@ -7150,18 +7637,9 @@ function GameMixAvatar({ entityId, name }) {
       alignItems: 'center', 
       justifyContent: 'center', 
       borderRadius: 4, 
-      fontSize: 12,
-      whiteSpace: 'normal', 
-      wordBreak: 'break-word',
-      textAlign: 'center',
-      padding: '0 2px',
       lineHeight: '1.1'
     }}>
       {name}
     </div>
   );
 }
-
-// Adaug funcția handleMetrologyCvtDateChange pentru a salva data CVT la slot/metrology
-// Funcțiile pentru metrology sunt acum în interiorul componentei Dashboard
-
