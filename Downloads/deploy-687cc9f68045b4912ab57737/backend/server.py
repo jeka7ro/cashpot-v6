@@ -1480,8 +1480,23 @@ async def create_metrology(metrology_data: MetrologyCreate, current_user: User =
 
 @api_router.get("/metrology", response_model=List[Metrology])
 async def get_metrology(current_user: User = Depends(get_current_user)):
-    # Return empty list for now to avoid validation errors
-    return []
+    try:
+        cursor = db.metrology.find({})
+        metrology_list = await cursor.to_list(length=None)
+        valid_metrology = []
+        for item in metrology_list:
+            try:
+                converted_item = convert_objectid_to_str(item)
+                # Skip items with missing required fields
+                if all(field in converted_item for field in ['expiry_date', 'calibration_interval', 'next_calibration_date']):
+                    valid_metrology.append(Metrology(**converted_item))
+            except Exception as e:
+                print(f"Error processing metrology item: {e}")
+                continue
+        return valid_metrology
+    except Exception as e:
+        print(f"Error in get_metrology: {e}")
+        return []
 
 @api_router.get("/metrology/{metrology_id}", response_model=Metrology)
 async def get_metrology_record(metrology_id: str, current_user: User = Depends(get_current_user)):
@@ -1534,8 +1549,23 @@ async def create_jackpot(jackpot_data: JackpotCreate, current_user: User = Depen
 
 @api_router.get("/jackpots", response_model=List[Jackpot])
 async def get_jackpots(current_user: User = Depends(get_current_user)):
-    # Return empty list for now to avoid validation errors
-    return []
+    try:
+        cursor = db.jackpots.find({})
+        jackpot_list = await cursor.to_list(length=None)
+        valid_jackpots = []
+        for item in jackpot_list:
+            try:
+                converted_item = convert_objectid_to_str(item)
+                # Skip items with missing required fields
+                if all(field in converted_item for field in ['serial_number', 'current_amount', 'max_amount', 'reset_amount', 'increment_rate', 'last_reset_date', 'description']):
+                    valid_jackpots.append(Jackpot(**converted_item))
+            except Exception as e:
+                print(f"Error processing jackpot item: {e}")
+                continue
+        return valid_jackpots
+    except Exception as e:
+        print(f"Error in get_jackpots: {e}")
+        return []
 
 @api_router.get("/jackpots/{jackpot_id}", response_model=Jackpot)
 async def get_jackpot(jackpot_id: str, current_user: User = Depends(get_current_user)):
