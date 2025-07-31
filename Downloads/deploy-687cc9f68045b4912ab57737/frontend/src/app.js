@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as XLSX from 'xlsx';
 import './app.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8002';
+const BACKEND_URL = 'http://localhost:8002';
 const API = `${BACKEND_URL}/api`;
 
 // Calendar Component
@@ -147,30 +147,52 @@ const Calendar = ({ value, onChange, placeholder = "Select date" }) => {
 const AuthContext = createContext();
 
 // Avatar Upload Component
-const AvatarUpload = ({ entityType, entityId, currentAvatar, onAvatarChange }) => {
+const AvatarUpload = ({ entityType, entityId, currentAvatar, onAvatarChange, showCustomNotification }) => {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const { user } = useAuth();
 
   const handleFileUpload = async (file) => {
     if (!file || !file.type.startsWith('image/')) {
-      alert('Please select a valid image file');
+      showCustomNotification('Please select a valid image file', 'error');
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      alert('File size must be less than 5MB');
+      showCustomNotification('File size must be less than 5MB', 'error');
       return;
     }
 
     setUploading(true);
     try {
+      console.log('Starting avatar upload for:', { entityType, entityId, file: file.name });
+      
       // Convert file to base64
       const base64 = await new Promise((resolve) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onload = () => {
+          let base64Data = reader.result.split(',')[1];
+          // Add padding if needed
+          while (base64Data.length % 4) {
+            base64Data += '=';
+          }
+          resolve(base64Data);
+        };
         reader.readAsDataURL(file);
       });
+
+      const uploadData = {
+        filename: `avatar_${Date.now()}.${file.name.split('.').pop()}`,
+        original_filename: file.name,
+        file_size: file.size,
+        mime_type: file.type,
+        file_data: base64,
+        entity_type: entityType,
+        entity_id: entityId
+      };
+
+      console.log('Uploading to:', `${API}/attachments`);
+      console.log('Upload data:', { ...uploadData, file_data: 'base64_data' });
 
       // Upload to backend
       const response = await fetch(`${API}/attachments`, {
@@ -179,26 +201,26 @@ const AvatarUpload = ({ entityType, entityId, currentAvatar, onAvatarChange }) =
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({
-          filename: `avatar_${Date.now()}.${file.name.split('.').pop()}`,
-          original_filename: file.name,
-          file_size: file.size,
-          mime_type: file.type,
-          file_data: base64,
-          entity_type: entityType,
-          entity_id: entityId
-        })
+        body: JSON.stringify(uploadData)
       });
+
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
 
       if (response.ok) {
         const attachment = await response.json();
+        console.log('Upload successful:', attachment);
         onAvatarChange(attachment);
+        showCustomNotification('Avatar uploaded successfully', 'success');
       } else {
-        throw new Error('Upload failed');
+        const errorText = await response.text();
+        console.error('Upload failed with status:', response.status);
+        console.error('Error response:', errorText);
+        throw new Error(`Upload failed: ${response.status} - ${errorText}`);
       }
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Failed to upload avatar');
+      showCustomNotification(`Failed to upload avatar: ${error.message}`, 'error');
     } finally {
       setUploading(false);
     }
@@ -263,7 +285,7 @@ const AvatarUpload = ({ entityType, entityId, currentAvatar, onAvatarChange }) =
 };
 
 // File Upload Component for PDF and other documents
-const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/png', 'image/jpeg'], maxSizeMB = 50 }) => {
+const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/png', 'image/jpeg'], maxSizeMB = 50, showCustomNotification }) => {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const { user } = useAuth();
@@ -271,22 +293,32 @@ const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['appl
   const handleFileUpload = async (file) => {
     // Validate file type
     if (!acceptedTypes.includes(file.type)) {
-      alert(`Please select a valid file type. Accepted types: ${acceptedTypes.join(', ')}`);
+      showCustomNotification(`Please select a valid file type. Accepted types: ${acceptedTypes.join(', ')}`, 'error');
       return;
     }
 
     // Validate file size
     if (file.size > maxSizeMB * 1024 * 1024) {
-      alert(`File size must be less than ${maxSizeMB}MB`);
+      showCustomNotification(`File size must be less than ${maxSizeMB}MB`, 'error');
       return;
     }
 
     setUploading(true);
     try {
       // Convert file to base64
-      const base64 = await new Promise((resolve) => {
+      const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onload = () => {
+          const result = reader.result;
+          // Extract base64 data from data URL
+          const base64Data = result.split(',')[1];
+          if (!base64Data) {
+            reject(new Error('Failed to convert file to base64'));
+            return;
+          }
+          resolve(base64Data);
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
         reader.readAsDataURL(file);
       });
 
@@ -311,13 +343,13 @@ const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['appl
       if (response.ok) {
         const attachment = await response.json();
         onFileUpload(attachment);
-        alert('File uploaded successfully!');
+        showCustomNotification('File uploaded successfully!', 'success');
       } else {
         throw new Error('Upload failed');
       }
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Failed to upload file');
+      showCustomNotification('Failed to upload file', 'error');
     } finally {
       setUploading(false);
     }
@@ -348,27 +380,27 @@ const FileUpload = ({ entityType, entityId, onFileUpload, acceptedTypes = ['appl
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          padding: '8px 16px',
+          gap: '4px',
+          padding: '4px 8px',
           backgroundColor: dragOver ? 'var(--accent-color)' : 'var(--background-secondary)',
           color: dragOver ? 'white' : 'var(--text-primary)',
-          border: `2px dashed ${dragOver ? 'var(--accent-color)' : '#ddd'}`,
-          borderRadius: '6px',
+          border: `1px dashed ${dragOver ? 'var(--accent-color)' : '#ddd'}`,
+          borderRadius: '4px',
           cursor: 'pointer',
-          fontSize: '14px',
+          fontSize: '11px',
           fontWeight: '500',
           transition: 'all 0.2s ease',
-          minWidth: '120px',
+          minWidth: '60px',
           justifyContent: 'center'
         }}
         title="Click to upload or drag files here"
       >
-        <span style={{ fontSize: '16px' }}>📎</span>
+        <span style={{ fontSize: '12px' }}>📎</span>
         <span>Upload</span>
         {uploading && (
           <span style={{ 
-            fontSize: '12px', 
-            marginLeft: '4px',
+            fontSize: '10px', 
+            marginLeft: '2px',
             animation: 'pulse 1s infinite'
           }}>
             ...
@@ -421,13 +453,11 @@ const useFiles = (entityType, entityId) => {
 
   return { files, setFiles, loading, refetch: fetchFiles };
 };
-
 // File Display Component
-const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
+const FileDisplay = ({ entityType, entityId, onFileDelete, showCustomNotification }) => {
   const { files, loading, refetch } = useFiles(entityType, entityId);
-  const [hoveredFile, setHoveredFile] = useState(null);
-  const [previewData, setPreviewData] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState(null);
 
   const handleDownload = async (attachment) => {
     try {
@@ -461,7 +491,7 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
       }
     } catch (error) {
       console.error('Download error:', error);
-      alert('Failed to download file: ' + error.message);
+              showCustomNotification('Failed to download file: ' + error.message, 'error');
     }
   };
 
@@ -474,60 +504,62 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
       if (response.ok) {
         const data = await response.json();
         
-        // Convert base64 to blob
-        const byteCharacters = atob(data.file_data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        // Convert base64 to blob with error handling
+        try {
+          // Clean the base64 data (remove any whitespace or invalid characters)
+          const cleanBase64 = data.file_data.replace(/[\n\r\s]/g, '');
+          
+          const byteCharacters = atob(cleanBase64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: data.mime_type });
+          
+          // Create preview URL
+          const url = window.URL.createObjectURL(blob);
+          
+          // For PDFs, try to open in new tab
+          if (data.mime_type === 'application/pdf') {
+            const newWindow = window.open(url, '_blank');
+            if (!newWindow) {
+              // If popup blocked, try to download instead
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = data.original_filename || 'document.pdf';
+              link.click();
+            }
+          } else {
+            // For other files, open in new tab
+            window.open(url, '_blank');
+          }
+          
+          // Clean up URL after a delay
+          setTimeout(() => window.URL.revokeObjectURL(url), 5000);
+        } catch (base64Error) {
+          console.error('Base64 conversion error:', base64Error);
+          throw new Error('Failed to convert file data for preview');
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: data.mime_type });
-        
-        // Create preview URL
-        const url = window.URL.createObjectURL(blob);
-        // Deschide în tab nou pentru preview
-        window.open(url, '_blank');
-        // Nu revoke URL-ul imediat pentru că fișierul poate fi încă în tab
-        setTimeout(() => window.URL.revokeObjectURL(url), 1000);
       } else {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
     } catch (error) {
       console.error('Preview error:', error);
-      alert('Failed to preview file: ' + error.message);
+              showCustomNotification('Failed to preview file: ' + error.message, 'error');
     }
-  };
-
-  const handleMouseOver = async (file) => {
-    setHoveredFile(file);
-    setPreviewLoading(true);
-    
-    try {
-      const response = await fetch(`${API}/attachments/${file.id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setPreviewData(data);
-      }
-    } catch (error) {
-      console.error('Preview hover error:', error);
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setHoveredFile(null);
-    setPreviewData(null);
   };
 
   const handleDelete = async (attachment) => {
-    if (!confirm('Are you sure you want to delete this file?')) return;
+    setFileToDelete(attachment);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!fileToDelete) return;
     
     try {
-      const response = await fetch(`${API}/attachments/${attachment.id}`, {
+      const response = await fetch(`${API}/attachments/${fileToDelete.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
@@ -538,10 +570,26 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
       } else {
         throw new Error('Delete failed');
       }
+      
+      // Clean up and close modal
+      setShowDeleteConfirm(false);
+      setFileToDelete(null);
+      refetch();
+      
+      if (onFileDelete) {
+        onFileDelete();
+      }
     } catch (error) {
       console.error('Delete error:', error);
-      alert('Failed to delete file');
+              showCustomNotification('Failed to delete file', 'error');
+      setShowDeleteConfirm(false);
+      setFileToDelete(null);
     }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteConfirm(false);
+    setFileToDelete(null);
   };
 
   const getFileIcon = (mimeType) => {
@@ -549,167 +597,6 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
     if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return '📊';
     if (mimeType.startsWith('image/')) return '🖼️';
     return '📎';
-  };
-
-  const renderPreview = () => {
-    if (!hoveredFile || !previewData) return null;
-
-    const isImage = previewData.mime_type.startsWith('image/');
-    const isPDF = previewData.mime_type === 'application/pdf';
-    const isText = previewData.mime_type.startsWith('text/');
-
-    return (
-      <>
-        {/* Overlay pentru închiderea preview-ului */}
-        <div 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 9999
-          }}
-          onClick={handleMouseLeave}
-        />
-        <div style={{
-          position: 'fixed',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          backgroundColor: 'var(--background-primary)',
-          border: '2px solid var(--accent-color)',
-          borderRadius: '8px',
-          padding: '16px',
-          maxWidth: '80vw',
-          maxHeight: '80vh',
-          overflow: 'auto',
-          zIndex: 10000,
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px'
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            borderBottom: '1px solid var(--border-color)',
-            paddingBottom: '8px'
-          }}>
-            <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>
-              {hoveredFile.original_filename}
-            </h3>
-            <button
-              onClick={handleMouseLeave}
-              style={{
-                background: 'none',
-                border: 'none',
-                fontSize: '20px',
-                cursor: 'pointer',
-                color: 'var(--text-secondary)'
-              }}
-            >
-              ✕
-            </button>
-          </div>
-          
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            {previewLoading ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                Loading preview...
-              </div>
-            ) : isImage ? (
-              <img
-                src={`data:${previewData.mime_type};base64,${previewData.file_data}`}
-                alt={hoveredFile.original_filename}
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '60vh',
-                  objectFit: 'contain'
-                }}
-              />
-            ) : isPDF ? (
-              <iframe
-                src={`data:${previewData.mime_type};base64,${previewData.file_data}`}
-                style={{
-                  width: '100%',
-                  height: '60vh',
-                  border: 'none'
-                }}
-                title={hoveredFile.original_filename}
-              />
-            ) : isText ? (
-              <pre style={{
-                backgroundColor: 'var(--background-secondary)',
-                padding: '12px',
-                borderRadius: '4px',
-                fontSize: '12px',
-                overflow: 'auto',
-                maxHeight: '60vh',
-                color: 'var(--text-primary)',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word'
-              }}>
-                {atob(previewData.file_data)}
-              </pre>
-            ) : (
-              <div style={{
-                textAlign: 'center',
-                padding: '20px',
-                color: 'var(--text-secondary)'
-              }}>
-                <div style={{ fontSize: '48px', marginBottom: '8px' }}>
-                  {getFileIcon(previewData.mime_type)}
-                </div>
-                <p>Preview not available for this file type</p>
-                <p style={{ fontSize: '12px' }}>
-                  {previewData.mime_type} • {(previewData.file_size / 1024 / 1024).toFixed(1)} MB
-                </p>
-              </div>
-            )}
-          </div>
-          
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            justifyContent: 'center',
-            borderTop: '1px solid var(--border-color)',
-            paddingTop: '8px'
-          }}>
-            <button
-              onClick={() => handleDownload(hoveredFile)}
-              style={{
-                padding: '6px 12px',
-                backgroundColor: 'var(--accent-color)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px'
-              }}
-            >
-              Download
-            </button>
-            <button
-              onClick={() => handlePreview(hoveredFile)}
-              style={{
-                padding: '6px 12px',
-                backgroundColor: 'var(--background-secondary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px'
-              }}
-            >
-              Open Full
-            </button>
-          </div>
-        </div>
-      </>
-    );
   };
 
 
@@ -722,11 +609,11 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
     return (
       <div style={{ 
         textAlign: 'center', 
-        padding: '15px',
-        color: 'var(--text-secondary)',
-        fontSize: '14px'
+        padding: '8px',
+        color: 'var(--text-primary)',
+        fontSize: '13px'
       }}>
-        <p style={{ marginBottom: '10px' }}>Nu sunt fișiere atașate</p>
+        <p style={{ marginBottom: '8px' }}>No files attached</p>
         <FileUpload
           entityType={entityType}
           entityId={entityId}
@@ -737,18 +624,17 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
   }
 
   return (
-    <div style={{ padding: '10px' }}>
-      {renderPreview()}
+    <div style={{ padding: '8px' }}>
       <div style={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center', 
-        marginBottom: '12px',
-        fontSize: '14px',
+        marginBottom: '8px',
+        fontSize: '13px',
         fontWeight: '500',
         color: 'var(--text-primary)'
       }}>
-        <span>Fișiere ({files.length})</span>
+        <span>Files ({files.length})</span>
         <FileUpload
           entityType={entityType}
           entityId={entityId}
@@ -758,63 +644,52 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
       <div style={{ 
         display: 'flex', 
         flexDirection: 'column', 
-        gap: '8px',
-        maxHeight: '200px',
+        gap: '4px',
+        maxHeight: '150px',
         overflowY: 'auto'
       }}>
         {files.map((file) => (
-          <div 
-            key={file.id} 
-            onMouseEnter={() => handleMouseOver(file)}
-            onMouseLeave={handleMouseLeave}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 12px',
-              backgroundColor: 'var(--background-secondary)',
-              borderRadius: '6px',
-              fontSize: '13px',
-              border: '1px solid #eee',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              ':hover': {
-                backgroundColor: 'var(--accent-color)',
-                color: 'white'
-              }
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-              <span style={{ fontSize: '16px' }}>{getFileIcon(file.mime_type)}</span>
+          <div key={file.id} style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 8px',
+            backgroundColor: 'var(--background-secondary)',
+            borderRadius: '4px',
+            fontSize: '12px',
+            border: '1px solid #eee'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+              <span style={{ fontSize: '14px' }}>{getFileIcon(file.mime_type)}</span>
               <span style={{ 
                 fontWeight: '500', 
                 color: 'var(--text-primary)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
-                maxWidth: '200px'
+                maxWidth: '180px'
               }}>
                 {file.original_filename}
               </span>
               <span style={{ 
                 color: 'var(--text-secondary)', 
-                fontSize: '11px',
+                fontSize: '10px',
                 whiteSpace: 'nowrap'
               }}>
                 ({(file.file_size / 1024 / 1024).toFixed(1)} MB)
               </span>
             </div>
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{ display: 'flex', gap: '2px' }}>
               <button 
                 onClick={() => handlePreview(file)}
                 title="Preview"
                 style={{
-                  padding: '4px 6px',
+                  padding: '2px 4px',
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
-                  borderRadius: '4px',
-                  fontSize: '12px'
+                  borderRadius: '3px',
+                  fontSize: '11px'
                 }}
               >
                 👁️
@@ -823,12 +698,12 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
                 onClick={() => handleDownload(file)}
                 title="Download"
                 style={{
-                  padding: '4px 6px',
+                  padding: '2px 4px',
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
-                  borderRadius: '4px',
-                  fontSize: '12px'
+                  borderRadius: '3px',
+                  fontSize: '11px'
                 }}
               >
                 ⬇️
@@ -837,12 +712,12 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
                 onClick={() => handleDelete(file)}
                 title="Delete"
                 style={{
-                  padding: '4px 6px',
+                  padding: '2px 4px',
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
-                  borderRadius: '4px',
-                  fontSize: '12px',
+                  borderRadius: '3px',
+                  fontSize: '11px',
                   color: '#e74c3c'
                 }}
               >
@@ -852,6 +727,125 @@ const FileDisplay = ({ entityType, entityId, onFileDelete }) => {
           </div>
         ))}
       </div>
+      
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteConfirm && fileToDelete && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          fontFamily: 'var(--font-family)'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '450px',
+            width: '90%',
+            boxShadow: 'var(--glass-shadow)',
+            border: '1px solid var(--border-color)',
+            position: 'relative',
+            backdropFilter: 'var(--glass-blur)'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              marginBottom: '20px'
+            }}>
+              <span style={{
+                fontSize: '28px',
+                color: '#ff4757'
+              }}>⚠️</span>
+              <h3 style={{
+                margin: 0,
+                color: 'var(--text-primary)',
+                fontSize: '20px',
+                fontWeight: '600',
+                fontFamily: 'var(--font-family)'
+              }}>
+                Delete Confirmation
+              </h3>
+            </div>
+            
+            <p style={{
+              margin: '0 0 24px 0',
+              color: 'var(--text-secondary)',
+              fontSize: '15px',
+              lineHeight: '1.6',
+              fontFamily: 'var(--font-family)'
+            }}>
+              Are you sure you want to delete the file <strong style={{color: 'var(--text-primary)'}}>"{fileToDelete.original_filename}"</strong>?
+              <br />
+              <span style={{color: '#ff4757', fontSize: '13px'}}>This action cannot be undone.</span>
+            </p>
+            
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                onClick={cancelDelete}
+                style={{
+                  padding: '10px 20px',
+                  border: '2px solid var(--border-color)',
+                  borderRadius: '8px',
+                  backgroundColor: 'transparent',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'var(--font-family)'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                  e.target.style.borderColor = 'var(--accent-color)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.borderColor = 'var(--border-color)';
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  padding: '10px 20px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  background: 'var(--gradient-danger)',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'var(--font-family)'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.transform = 'translateY(-1px)';
+                  e.target.style.boxShadow = '0 4px 12px rgba(255, 71, 87, 0.4)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -895,42 +889,108 @@ const AttachmentIndicator = ({ slotId, onClick }) => {
   }, [slotId]);
 
   return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0px' }}>
+      <button 
+        className="btn-attachment"
+        title="View Slot Attachments"
+        onClick={onClick}
+        style={{ 
+          fontSize: '14px', 
+          padding: '2px 4px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '32px',
+          height: '32px',
+          cursor: 'pointer',
+          border: 'none',
+          backgroundColor: '#d1e7ff',
+          borderRadius: '50%',
+          color: '#1e3a8a',
+          marginRight: '0px'
+        }}
+      >
+        📎
+      </button>
+      {attachmentCount > 0 && (
+        <div style={{
+          backgroundColor: '#3182ce',
+          color: 'white',
+          borderRadius: '50%',
+          width: '18px',
+          height: '18px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          minWidth: '18px',
+          marginLeft: '-2px'
+        }}>
+          {attachmentCount}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Component for displaying CVT attachments count
+const CvtAttachmentIndicator = ({ cvtId, onClick }) => {
+  const [attachmentCount, setAttachmentCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const fetchAttachmentCount = async () => {
+    if (!cvtId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`${API}/attachments/metrology/${cvtId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Fetched attachments for CVT', cvtId, ':', data);
+        // Filtrează doar documentele (nu avatarurile)
+        const documentAttachments = data.filter(att => 
+          !att.mime_type.startsWith('image/') || 
+          (!att.filename.includes('avatar') && !att.filename.includes('custom_avatar'))
+        );
+        console.log('Document attachments for CVT', cvtId, ':', documentAttachments);
+        setAttachmentCount(documentAttachments.length);
+      } else {
+        console.error('Failed to fetch attachments for CVT', cvtId, ':', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching CVT attachments:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAttachmentCount();
+  }, [cvtId]);
+
+  return (
     <button 
       className="btn-attachment"
-      title="Atașamente"
+      title="View CVT Attachments"
       onClick={onClick}
       style={{ 
         fontSize: '14px', 
         padding: '2px 4px',
-        display: 'flex',
+        display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: '24px',
-        height: '24px',
-        gap: '4px',
+        width: '32px',
+        height: '32px',
         cursor: 'pointer',
         border: 'none',
-        background: 'transparent'
+        backgroundColor: '#d1e7ff',
+        borderRadius: '50%',
+        color: '#1e3a8a'
       }}
     >
-      <span style={{fontSize:'1.1em'}}>📎</span>
-      {attachmentCount > 0 && (
-        <span style={{
-          backgroundColor: 'var(--accent-color)',
-          color: 'white',
-          borderRadius: '50%',
-          width: '16px',
-          height: '16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '0.7em',
-          fontWeight: 'bold',
-          minWidth: '16px'
-        }}>
-          {attachmentCount}
-        </span>
-      )}
+      📎
     </button>
   );
 };
@@ -988,12 +1048,12 @@ const generateInitials = (name, entityType) => {
   const words = name.trim().split(/\s+|-/).filter(Boolean);
   console.log('WORDS:', words);
   
-  // Pentru Cabinets: 1 + 5 cu cratimă (prima literă din primul cuvânt + "-" + primele 5 din al doilea)
+  // Pentru Cabinets: 4 caractere (prima literă din primul cuvânt + primele 3 din al doilea)
   if (entityType === 'cabinets' && words.length >= 2) {
     const first = words[0].match(/[A-Za-z]/);
-    const second = words[1].match(/[A-Za-z0-9]{1,5}/);
-    const result = `${first ? first[0].toUpperCase() : ''}-${second ? second[0].toUpperCase() : ''}` || '?';
-    console.log('CABINETS 1+5:', result, '| first:', first?.[0], '| second:', second?.[0]);
+    const second = words[1].match(/[A-Za-z0-9]{1,3}/);
+    const result = `${first ? first[0].toUpperCase() : ''}${second ? second[0].toUpperCase() : ''}` || '?';
+    console.log('CABINETS 4 chars:', result, '| first:', first?.[0], '| second:', second?.[0]);
     return result;
   }
   
@@ -1020,9 +1080,8 @@ const generateInitials = (name, entityType) => {
   console.log('GENERATE INITIALS: No words found, returning ?');
   return '?';
 };
-
 // Custom Avatar Editor Component
-const CustomAvatarEditor = ({ entityType, entityId, currentAvatar, onAvatarChange, entityName }) => {
+const CustomAvatarEditor = ({ entityType, entityId, currentAvatar, onAvatarChange, entityName, showCustomNotification }) => {
   const [customText, setCustomText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
@@ -1086,13 +1145,13 @@ const CustomAvatarEditor = ({ entityType, entityId, currentAvatar, onAvatarChang
         if (response.ok) {
           const uploadedAvatar = await response.json();
           onAvatarChange(uploadedAvatar);
-          alert('Custom avatar saved successfully!');
+          showCustomNotification('Custom avatar saved successfully!', 'success');
         } else {
           throw new Error('Failed to save avatar');
         }
       } catch (error) {
         console.error('Error saving custom avatar:', error);
-        alert('Failed to save custom avatar. Please try again.');
+                  showCustomNotification('Failed to save custom avatar. Please try again.', 'error');
       }
       
       setIsEditing(false);
@@ -1122,7 +1181,7 @@ const CustomAvatarEditor = ({ entityType, entityId, currentAvatar, onAvatarChang
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: '50%',
-              fontSize: '20px', // Font proporțional pentru 68px
+              fontSize: entityType === 'cabinets' ? '16px' : '20px', // Font mai mic pentru cabinete
               cursor: 'pointer',
               border: '2px solid #ddd',
               boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)'
@@ -1240,7 +1299,7 @@ const CustomAvatarEditor = ({ entityType, entityId, currentAvatar, onAvatarChang
 
 // Avatar Display Component (for tables)
 const AvatarDisplay = ({ entityType, entityId, size = 50, entityName, rectangular, blueBgIfNoAvatar }) => {
-  const { avatar, loading } = useAvatar(entityType, entityId);
+  const { avatar, loading } = useAvatar(entityType, entityId || 'temp');
   
   console.log('AvatarDisplay render:', { entityType, entityId, entityName, avatar, loading });
 
@@ -1318,7 +1377,10 @@ const AvatarDisplay = ({ entityType, entityId, size = 50, entityName, rectangula
   console.log('Generated initials:', initials, 'for entity:', entityName, 'type:', entityType);
   
   // Calculează dimensiunea fontului proporțională cu dimensiunea avatar-ului
-  const fontSize = Math.max(12, Math.min(width * 0.4, 24)); // Între 12px și 24px, proporțional cu dimensiunea
+  // Pentru cabinete, font mai mic pentru a încăpea 4 caractere
+  const fontSize = entityType === 'cabinets' 
+    ? Math.max(8, Math.min(width * 0.25, 16)) // Pentru cabinete: între 8px și 16px
+    : Math.max(12, Math.min(width * 0.4, 24)); // Pentru restul: între 12px și 24px
   
   return (
     <div
@@ -1357,7 +1419,7 @@ const AuthProvider = ({ children }) => {
         if (user) {
           localStorage.removeItem('token');
           setUser(null);
-          alert('You have been logged out due to inactivity.');
+          showCustomNotification('You have been logged out due to inactivity.', 'warning');
         }
       }, 15 * 60 * 1000); // 15 minutes
     };
@@ -1455,6 +1517,20 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, l
   const [formData, setFormData] = useState({});
 
   const handleChange = (field, value) => {
+    // If setting status to inactive for slots, show confirmation
+    if (field === 'status' && value === 'inactive' && entityType === 'slots') {
+      const confirmed = window.confirm(
+        `⚠️ ATENȚIE!\n\n` +
+        `${selectedItems.length} slot-uri vor fi setate ca INACTIVE.\n\n` +
+        `Aceste slot-uri vor dispărea din lista de Slot Machines și vor fi mutate în Warehouse.\n\n` +
+        `Doriți să continuați?`
+      );
+      
+      if (!confirmed) {
+        return; // User cancelled
+      }
+    }
+    
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -1771,7 +1847,6 @@ const BulkEditForm = ({ entityType, selectedItems, onSave, onClose, companies, l
     </div>
   );
 };
-
 const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -1889,7 +1964,7 @@ const Login = () => {
 };
 
 // Generic Entity Form Component
-const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations, providers, cabinets, gameMixes, invoices, users, slotMachines }) => {
+const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations, providers, cabinets, gameMixes, invoices, users, slotMachines, showCustomNotification }) => {
   const [formData, setFormData] = useState({});
   
   // Avatar state
@@ -2015,18 +2090,18 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         status: 'active',
         description: ''
       },
-      jackpots: {
-        serial_numbers: '',
-        jackpot_name: '',
-        jackpot_type: 'progressive',
-        increment_percentage: 0.1,
-        level_1: '',
-        level_2: '',
-        level_3: '',
-        level_4: '',
-        level_5: '',
-        details: ''
-      }
+              jackpots: {
+          serial_number: '',
+          jackpot_name: '',
+          jackpot_type: 'progressive',
+          increment_rate: 0.1,
+          level_1: '',
+          level_2: '',
+          level_3: '',
+          level_4: '',
+          level_5: '',
+          description: ''
+        }
     };
     return defaults[type] || {};
   };
@@ -2097,7 +2172,6 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
     const gameArray = games.split('\n').filter(game => game.trim());
     setFormData(prev => ({ ...prev, games: gameArray }));
   };
-
   const renderFormFields = () => {
     switch (entityType) {
       case 'companies':
@@ -2165,43 +2239,43 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 onChange={(e) => handleChange('website', e.target.value)}
               />
             </div>
-            {entity && (
-              <>
-              <div className="form-group">
-                <label>Company Logo</label>
-                <div className="avatar-section">
-                  <AvatarUpload
-                    entityType="companies"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Custom Avatar Editor</label>
-                  <CustomAvatarEditor
-                    entityType="companies"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                    entityName={formData.name}
-                  />
-                </div>
+            <div className="form-group">
+              <label>Company Logo</label>
+              <div className="avatar-section">
+                <AvatarUpload
+                  entityType="companies"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  showCustomNotification={showCustomNotification}
+                />
               </div>
-                <div className="form-group">
-                  <label>Company Documents</label>
-                  <FileUpload
-                    entityType="companies"
-                    entityId={entity.id}
-                    onFileUpload={() => fetchFiles && fetchFiles()}
-                  />
-                  <FileDisplay
-                    entityType="companies"
-                    entityId={entity.id}
-                  />
-                </div>
-              </>
-            )}
+              <div className="form-group">
+                <label>Custom Avatar Editor</label>
+                <CustomAvatarEditor
+                  entityType="companies"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  entityName={formData.name}
+                  showCustomNotification={showCustomNotification}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Company Documents</label>
+              <FileUpload
+                entityType="companies"
+                entityId={entity?.id || 'temp'}
+                onFileUpload={() => fetchFiles && fetchFiles()}
+                showCustomNotification={showCustomNotification}
+              />
+              <FileDisplay
+                entityType="companies"
+                entityId={entity?.id || 'temp'}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
           </>
         );
 
@@ -2368,32 +2442,43 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 </div>
               </>
             )}
-            {entity && (
-              <>
+            <div className="form-group">
+              <label>Location Avatar</label>
+              <div className="avatar-section">
+                <AvatarUpload
+                  entityType="locations"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  showCustomNotification={showCustomNotification}
+                />
+              </div>
               <div className="form-group">
-                <label>Location Avatar</label>
+                <label>Custom Avatar Editor</label>
                 <CustomAvatarEditor
                   entityType="locations"
-                  entityId={entity.id}
+                  entityId={entity?.id || 'temp'}
                   currentAvatar={avatar}
                   onAvatarChange={handleAvatarChange}
                   entityName={formData.name}
+                  showCustomNotification={showCustomNotification}
                 />
               </div>
-                <div className="form-group">
-                  <label>Location Documents</label>
-                  <FileUpload
-                    entityType="locations"
-                    entityId={entity.id}
-                    onFileUpload={() => fetchFiles && fetchFiles()}
-                  />
-                  <FileDisplay
-                    entityType="locations"
-                    entityId={entity.id}
-                  />
-                </div>
-              </>
-            )}
+            </div>
+            <div className="form-group">
+              <label>Location Documents</label>
+              <FileUpload
+                entityType="locations"
+                entityId={entity?.id || 'temp'}
+                onFileUpload={() => fetchFiles && fetchFiles()}
+                showCustomNotification={showCustomNotification}
+              />
+              <FileDisplay
+                entityType="locations"
+                entityId={entity?.id || 'temp'}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
           </>
         );
 
@@ -2462,19 +2547,43 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 onChange={(e) => handleChange('website', e.target.value)}
               />
             </div>
-            {entity && (
-              <div className="form-group">
-                <label>Provider Logo</label>
-                <div className="avatar-section">
-                  <AvatarUpload
-                    entityType="providers"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                  />
-                </div>
+            <div className="form-group">
+              <label>Provider Logo</label>
+              <div className="avatar-section">
+                <AvatarUpload
+                  entityType="providers"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  showCustomNotification={showCustomNotification}
+                />
               </div>
-            )}
+              <div className="form-group">
+                <label>Custom Avatar Editor</label>
+                <CustomAvatarEditor
+                  entityType="providers"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  entityName={formData.name}
+                  showCustomNotification={showCustomNotification}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Provider Documents</label>
+              <FileUpload
+                entityType="providers"
+                entityId={entity?.id || 'temp'}
+                onFileUpload={() => fetchFiles && fetchFiles()}
+                showCustomNotification={showCustomNotification}
+              />
+              <FileDisplay
+                entityType="providers"
+                entityId={entity?.id || 'temp'}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
           </>
         );
 
@@ -2512,297 +2621,382 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 ))}
               </select>
             </div>
-            {entity && (
-              <div className="form-group">
-                <label>Cabinet Logo</label>
-                <div className="avatar-section">
-                  <AvatarUpload
-                    entityType="cabinets"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Custom Avatar Editor</label>
-                  <CustomAvatarEditor
-                    entityType="cabinets"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                    entityName={formData.name}
-                  />
-                </div>
+            <div className="form-group">
+              <label>Cabinet Logo</label>
+              <div className="avatar-section">
+                <AvatarUpload
+                  entityType="cabinets"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  showCustomNotification={showCustomNotification}
+                />
               </div>
-            )}
+            </div>
+            <div className="form-group">
+              <label>Custom Avatar Editor</label>
+              <CustomAvatarEditor
+                entityType="cabinets"
+                entityId={entity?.id || 'temp'}
+                currentAvatar={avatar}
+                onAvatarChange={handleAvatarChange}
+                entityName={formData.name}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
+            <div className="form-group">
+              <label>Cabinet Documents</label>
+              <FileUpload
+                entityType="cabinets"
+                entityId={entity?.id || 'temp'}
+                onFileUpload={() => fetchFiles && fetchFiles()}
+                showCustomNotification={showCustomNotification}
+              />
+              <FileDisplay
+                entityType="cabinets"
+                entityId={entity?.id || 'temp'}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
           </>
         );
-
       case 'slots':
         return (
           <>
-            <div className="form-group">
-              <label>Provider *</label>
-              <select
-                value={formData.provider_id || ''}
-                onChange={(e) => handleChange('provider_id', e.target.value)}
-                required
-              >
-                <option value="">Select Provider</option>
-                {providers.map(provider => (
-                  <option key={provider.id} value={provider.id}>{provider.name}</option>
-                ))}
-              </select>
+            {/* Section 1: Basic Information */}
+            <div style={{ 
+              backgroundColor: 'var(--background-secondary)', 
+              padding: '20px', 
+              borderRadius: '8px', 
+              marginBottom: '20px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '16px',
+                fontWeight: '600',
+                borderBottom: '2px solid var(--accent-color)',
+                paddingBottom: '8px'
+              }}>
+                📋 Basic Information
+              </h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                {/* Left Column - Basic Info */}
+                <div>
+                  <div className="form-group">
+                    <label>Provider *</label>
+                    <select
+                      value={formData.provider_id || ''}
+                      onChange={(e) => handleChange('provider_id', e.target.value)}
+                      required
+                    >
+                      <option value="">Select Provider</option>
+                      {providers.map(provider => (
+                        <option key={provider.id} value={provider.id}>{provider.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Game Mix *</label>
+                    <select
+                      value={formData.game_mix_id || ''}
+                      onChange={(e) => handleChange('game_mix_id', e.target.value)}
+                      required
+                    >
+                      <option value="">Select Game Mix</option>
+                      {gameMixes
+                        .filter(mix => {
+                          if (!formData.provider_id) return true;
+                          return mix.provider_id === formData.provider_id;
+                        })
+                        .map(mix => {
+                          const provider = providers.find(p => p.id === mix.provider_id);
+                          return (
+                            <option key={mix.id} value={mix.id}>
+                              {mix.name} ({provider ? provider.name : 'Unknown Provider'})
+                            </option>
+                          );
+                        })}
+                    </select>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Cabinet *</label>
+                    <select
+                      value={formData.cabinet_id || ''}
+                      onChange={(e) => handleChange('cabinet_id', e.target.value)}
+                      required
+                    >
+                      <option value="">Select Cabinet</option>
+                      {cabinets
+                        .filter(cabinet => {
+                          if (!formData.provider_id) return true;
+                          return cabinet.provider_id === formData.provider_id;
+                        })
+                        .map(cabinet => {
+                          const provider = providers.find(p => p.id === cabinet.provider_id);
+                          return (
+                            <option key={cabinet.id} value={cabinet.id}>
+                              {cabinet.name} ({provider ? provider.name : 'Unknown Provider'})
+                            </option>
+                          );
+                        })}
+                    </select>
+                  </div>
+                </div>
+                
+                {/* Right Column - Basic Info */}
+                <div>
+                  <div className="form-group">
+                    <label>Serial Number *</label>
+                    <input
+                      type="text"
+                      value={formData.serial_number || ''}
+                      onChange={(e) => handleChange('serial_number', e.target.value)}
+                      required
+                      placeholder="e.g., SER001"
+                    />
+                    <small className="field-help">Enter the unique serial number for this slot machine</small>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Model *</label>
+                    <input
+                      type="text"
+                      value={formData.model || ''}
+                      readOnly
+                      required
+                      placeholder="Auto-filled from selected cabinet"
+                    />
+                    <small className="field-help">Model is automatically filled based on the selected cabinet</small>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Location *</label>
+                    <select
+                      value={formData.location_id || ''}
+                      onChange={(e) => handleChange('location_id', e.target.value)}
+                      required
+                    >
+                      <option value="">All Locations</option>
+                      {locations.map(location => (
+                        <option key={location.id} value={location.id}>{location.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="form-group">
-              <label>Cabinet *</label>
-              <select
-                value={formData.cabinet_id || ''}
-                onChange={(e) => handleChange('cabinet_id', e.target.value)}
-                required
-              >
-                <option value="">Select Cabinet</option>
-                {cabinets
-                  .filter(cabinet => {
-                    // Show all cabinets if no provider selected
-                    if (!formData.provider_id) return true;
-                    // Show only cabinets that match the selected provider
-                    return cabinet.provider_id === formData.provider_id;
-                  })
-                  .map(cabinet => {
-                    const provider = providers.find(p => p.id === cabinet.provider_id);
-                    return (
-                      <option key={cabinet.id} value={cabinet.id}>
-                        {cabinet.name} ({provider ? provider.name : 'Unknown Provider'})
-                      </option>
-                    );
-                  })}
-              </select>
+            
+            {/* Section 2: Financial & Technical Details */}
+            <div style={{ 
+              backgroundColor: 'var(--background-secondary)', 
+              padding: '20px', 
+              borderRadius: '8px', 
+              marginBottom: '20px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '16px',
+                fontWeight: '600',
+                borderBottom: '2px solid var(--accent-color)',
+                paddingBottom: '8px'
+              }}>
+                💰 Financial & Technical Details
+              </h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
+                <div className="form-group">
+                  <label>Denomination (€) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.denomination || ''}
+                    onChange={(e) => handleChange('denomination', parseFloat(e.target.value))}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label>Max Bet (€) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.max_bet || ''}
+                    onChange={(e) => handleChange('max_bet', parseFloat(e.target.value))}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label>RTP (%) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.rtp || ''}
+                    onChange={(e) => handleChange('rtp', parseFloat(e.target.value))}
+                    required
+                  />
+                </div>
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
+                <div className="form-group">
+                  <label>Production Year *</label>
+                  <input
+                    type="number"
+                    min="1980"
+                    max={new Date().getFullYear()}
+                    value={formData.production_year || ''}
+                    onChange={(e) => handleChange('production_year', parseInt(e.target.value))}
+                    required
+                    placeholder="e.g., 2023"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label>Gaming Places *</label>
+                  <input
+                    type="number"
+                    value={formData.gaming_places || ''}
+                    onChange={(e) => handleChange('gaming_places', parseInt(e.target.value))}
+                    required
+                  />
+                </div>
+              </div>
             </div>
-            <div className="form-group">
-              <label>Game Mix *</label>
-              <select
-                value={formData.game_mix_id || ''}
-                onChange={(e) => handleChange('game_mix_id', e.target.value)}
-                required
-              >
-                <option value="">Select Game Mix</option>
-                {gameMixes
-                  .filter(mix => {
-                    // Show all game mixes if no provider selected
-                    if (!formData.provider_id) return true;
-                    // Show only game mixes that match the selected provider
-                    return mix.provider_id === formData.provider_id;
-                  })
-                  .map(mix => {
-                    const provider = providers.find(p => p.id === mix.provider_id);
-                    return (
-                      <option key={mix.id} value={mix.id}>
-                        {mix.name} ({provider ? provider.name : 'Unknown Provider'})
-                      </option>
-                    );
-                  })}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Serial Number *</label>
-              <input
-                type="text"
-                value={formData.serial_number || ''}
-                onChange={(e) => handleChange('serial_number', e.target.value)}
-                required
-                placeholder="e.g., SER001"
-              />
-              <small className="field-help">Enter the unique serial number for this slot machine</small>
-            </div>
-            <div className="form-group">
-              <label>Invoice Number</label>
-              <select
-                value={formData.invoice_number || ''}
-                onChange={(e) => handleChange('invoice_number', e.target.value)}
-              >
-                <option value="">Select Invoice</option>
-                {invoices.map(invoice => (
-                  <option key={invoice.id} value={invoice.invoice_number}>
-                    {invoice.invoice_number} - {invoice.amount}€
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Model *</label>
-              <input
-                type="text"
-                value={formData.model || ''}
-                readOnly
-                required
-                placeholder="Auto-filled from selected cabinet"
-              />
-              <small className="field-help">Model is automatically filled based on the selected cabinet</small>
-            </div>
-            <div className="form-group">
-              <label>Production Year *</label>
-              <input
-                type="number"
-                min="1980"
-                max={new Date().getFullYear()}
-                value={formData.production_year || ''}
-                onChange={(e) => handleChange('production_year', parseInt(e.target.value))}
-                required
-                placeholder="e.g., 2023"
-              />
-            </div>
-            <div className="form-group">
-              <label>Location *</label>
-              <select
-                value={formData.location_id || ''}
-                onChange={(e) => handleChange('location_id', e.target.value)}
-                required
-              >
-                <option value="">All Locations</option>
-                {locations.map(location => (
-                  <option key={location.id} value={location.id}>{location.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Ownership Type *</label>
-              <select
-                value={formData.ownership_type || ''}
-                onChange={(e) => handleChange('ownership_type', e.target.value)}
-                required
-              >
-                <option value="">Select Ownership Type</option>
-                <option value="property">Property (Owned)</option>
-                <option value="rent">Rent (Leased)</option>
-              </select>
-            </div>
-            {formData.ownership_type === 'property' && (
-              <div className="form-group">
-                <label>Owner Company *</label>
+            
+            {/* Section 3: Ownership & Documentation */}
+            <div style={{ 
+              backgroundColor: 'var(--background-secondary)', 
+              padding: '20px', 
+              borderRadius: '8px', 
+              marginBottom: '20px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '16px',
+                fontWeight: '600',
+                borderBottom: '2px solid var(--accent-color)',
+                paddingBottom: '8px'
+              }}>
+                📄 Ownership & Documentation
+              </h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                <div className="form-group">
+                  <label>Ownership Type *</label>
+                  <select
+                    value={formData.ownership_type || ''}
+                    onChange={(e) => handleChange('ownership_type', e.target.value)}
+                    required
+                  >
+                    <option value="">Select Ownership Type</option>
+                    <option value="property">Property (Owned)</option>
+                    <option value="rent">Rent (Leased)</option>
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label>Owner Company</label>
+                  <input
+                    type="text"
+                    value={formData.owner_company || ''}
+                    onChange={(e) => handleChange('owner_company', e.target.value)}
+                    placeholder="e.g., SMARTFLIX"
+                  />
+                </div>
+              </div>
+              
+              <div className="form-group" style={{ marginTop: '20px' }}>
+                <label>Invoice Number</label>
                 <select
-                  value={formData.owner_company_id || ''}
-                  onChange={(e) => handleChange('owner_company_id', e.target.value)}
-                  required
+                  value={formData.invoice_number || ''}
+                  onChange={(e) => handleChange('invoice_number', e.target.value)}
                 >
-                  <option value="">Select Owner Company</option>
-                  {companies.map(company => (
-                    <option key={company.id} value={company.id}>{company.name}</option>
+                  <option value="">Select Invoice</option>
+                  {invoices.map(invoice => (
+                    <option key={invoice.id} value={invoice.invoice_number}>
+                      {invoice.invoice_number} - {invoice.amount}€
+                    </option>
                   ))}
                 </select>
               </div>
-            )}
-            {formData.ownership_type === 'rent' && (
-              <>
-                <div className="form-group">
-                  <label>Lease Provider *</label>
-                  <select
-                    value={formData.lease_provider_id || ''}
-                    onChange={(e) => handleChange('lease_provider_id', e.target.value)}
-                    required
-                  >
-                    <option value="">Select Lease Provider</option>
-                    {providers.map(provider => (
-                      <option key={provider.id} value={provider.id}>{provider.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Lease Contract Number *</label>
-                  <input
-                    type="text"
-                    value={formData.lease_contract_number || ''}
-                    onChange={(e) => handleChange('lease_contract_number', e.target.value)}
-                    required
-                    placeholder="e.g., LC-2024-001"
-                  />
-                </div>
-              </>
-            )}
-            <div className="form-group">
-              <label>Denomination (€) *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={formData.denomination || ''}
-                onChange={(e) => handleChange('denomination', parseFloat(e.target.value))}
-                required
-              />
+              
+              <div className="form-group" style={{ marginTop: '20px' }}>
+                <label>Commission Date</label>
+                <Calendar
+                  value={formData.commission_date}
+                  onChange={(date) => handleChange('commission_date', date)}
+                  placeholder="Select commission date"
+                />
+              </div>
             </div>
-            <div className="form-group">
-              <label>Max Bet (€) *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={formData.max_bet || ''}
-                onChange={(e) => handleChange('max_bet', parseFloat(e.target.value))}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>RTP (%) *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={formData.rtp || ''}
-                onChange={(e) => handleChange('rtp', parseFloat(e.target.value))}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Gaming Places *</label>
-              <input
-                type="number"
-                value={formData.gaming_places || ''}
-                onChange={(e) => handleChange('gaming_places', parseInt(e.target.value))}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Commission Date</label>
-              <Calendar
-                value={formData.commission_date}
-                onChange={(date) => handleChange('commission_date', date)}
-                placeholder="Select commission date"
-              />
-            </div>
-            {entity && (
-              <>
+            
+            {/* Section 4: Avatar & Documents */}
+            <div style={{ 
+              backgroundColor: 'var(--background-secondary)', 
+              padding: '20px', 
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <h3 style={{ 
+                margin: '0 0 20px 0', 
+                color: 'var(--text-primary)', 
+                fontSize: '16px',
+                fontWeight: '600',
+                borderBottom: '2px solid var(--accent-color)',
+                paddingBottom: '8px'
+              }}>
+                🖼️ Avatar & Documents
+              </h3>
+              
               <div className="form-group">
                 <label>Slot Machine Avatar</label>
                 <div className="avatar-section">
                   <AvatarUpload
                     entityType="slots"
-                    entityId={entity.id}
+                    entityId={entity?.id || 'temp'}
                     currentAvatar={avatar}
                     onAvatarChange={handleAvatarChange}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Custom Avatar Editor</label>
-                  <CustomAvatarEditor
-                    entityType="slots"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                    entityName={formData.serial_number}
+                    showCustomNotification={showCustomNotification}
                   />
                 </div>
               </div>
-                <div className="form-group">
-                  <label>Slot Machine Documents</label>
-                  <FileUpload
-                    entityType="slots"
-                    entityId={entity.id}
-                    onFileUpload={() => {}}
-                  />
-                  <FileDisplay
-                    entityType="slots"
-                    entityId={entity.id}
-                  />
-                </div>
-              </>
-            )}
+              
+              <div className="form-group">
+                <label>Custom Avatar Editor</label>
+                <CustomAvatarEditor
+                  entityType="slots"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  entityName={formData.serial_number}
+                  showCustomNotification={showCustomNotification}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Slot Machine Documents</label>
+              <FileUpload
+                entityType="slots"
+                entityId={entity?.id || 'temp'}
+                onFileUpload={() => fetchFiles && fetchFiles()}
+                showCustomNotification={showCustomNotification}
+              />
+              <FileDisplay
+                entityType="slots"
+                entityId={entity?.id || 'temp'}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
           </>
         );
 
@@ -2850,19 +3044,43 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 placeholder="Enter game names, one per line"
               />
             </div>
-            {entity && (
-              <div className="form-group">
-                <label>Game Mix Avatar</label>
-                <div className="avatar-section">
-                  <AvatarUpload
-                    entityType="game_mixes"
-                    entityId={entity.id}
-                    currentAvatar={avatar}
-                    onAvatarChange={handleAvatarChange}
-                  />
-                </div>
+            <div className="form-group">
+              <label>Game Mix Avatar</label>
+              <div className="avatar-section">
+                <AvatarUpload
+                  entityType="game_mixes"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  showCustomNotification={showCustomNotification}
+                />
               </div>
-            )}
+              <div className="form-group">
+                <label>Custom Avatar Editor</label>
+                <CustomAvatarEditor
+                  entityType="game_mixes"
+                  entityId={entity?.id || 'temp'}
+                  currentAvatar={avatar}
+                  onAvatarChange={handleAvatarChange}
+                  entityName={formData.name}
+                  showCustomNotification={showCustomNotification}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Game Mix Documents</label>
+              <FileUpload
+                entityType="game_mixes"
+                entityId={entity?.id || 'temp'}
+                onFileUpload={() => fetchFiles && fetchFiles()}
+                showCustomNotification={showCustomNotification}
+              />
+              <FileDisplay
+                entityType="game_mixes"
+                entityId={entity?.id || 'temp'}
+                showCustomNotification={showCustomNotification}
+              />
+            </div>
           </>
         );
 
@@ -3042,13 +3260,20 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
               <label>Description *</label>
               <textarea value={formData.description || ''} onChange={(e) => handleChange('description', e.target.value)} required rows="3" />
             </div>
-            {entity && (
-              <div className="form-group">
-                <label>Metrology Documents</label>
-                <FileUpload entityType="metrology" entityId={entity.id} onFileUpload={() => fetchFiles && fetchFiles()} />
-                <FileDisplay entityType="metrology" entityId={entity.id} />
-              </div>
-            )}
+            <div className="form-group">
+              <label>Metrology Documents</label>
+              <FileUpload 
+                entityType="metrology" 
+                entityId={entity?.id || 'temp'} 
+                onFileUpload={() => fetchFiles && fetchFiles()} 
+                showCustomNotification={showCustomNotification} 
+              />
+              <FileDisplay 
+                entityType="metrology" 
+                entityId={entity?.id || 'temp'} 
+                showCustomNotification={showCustomNotification} 
+              />
+            </div>
           </>
         );
 
@@ -3056,12 +3281,12 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
         return (
           <>
             <div className="form-group">
-              <label>Serial Numbers *</label>
-              <textarea
-                value={formData.serial_numbers || ''}
-                onChange={(e) => handleChange('serial_numbers', e.target.value)}
-                rows="3"
-                placeholder="Enter serial numbers separated by spaces or new lines"
+              <label>Serial Number *</label>
+              <input
+                type="text"
+                value={formData.serial_number || ''}
+                onChange={(e) => handleChange('serial_number', e.target.value)}
+                placeholder="Enter slot machine serial number"
                 required
               />
             </div>
@@ -3082,71 +3307,73 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
                 required
               >
                 <option value="progressive">Progressive</option>
+                <option value="fixed">Fixed</option>
                 <option value="mystery">Mystery</option>
               </select>
             </div>
+                          <div className="form-group">
+                <label>Increment Rate (%) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.increment_rate || 0.1}
+                  onChange={(e) => handleChange('increment_rate', parseFloat(e.target.value))}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Level 1</label>
+                <input
+                  type="text"
+                  value={formData.level_1 || ''}
+                  onChange={(e) => handleChange('level_1', e.target.value)}
+                  placeholder="e.g., 111-222"
+                />
+              </div>
+              <div className="form-group">
+                <label>Level 2</label>
+                <input
+                  type="text"
+                  value={formData.level_2 || ''}
+                  onChange={(e) => handleChange('level_2', e.target.value)}
+                  placeholder="e.g., 222-333"
+                />
+              </div>
+              <div className="form-group">
+                <label>Level 3</label>
+                <input
+                  type="text"
+                  value={formData.level_3 || ''}
+                  onChange={(e) => handleChange('level_3', e.target.value)}
+                  placeholder="e.g., 333-555"
+                />
+              </div>
+              <div className="form-group">
+                <label>Level 4</label>
+                <input
+                  type="text"
+                  value={formData.level_4 || ''}
+                  onChange={(e) => handleChange('level_4', e.target.value)}
+                  placeholder="e.g., 555-888"
+                />
+              </div>
+              <div className="form-group">
+                <label>Level 5</label>
+                <input
+                  type="text"
+                  value={formData.level_5 || ''}
+                  onChange={(e) => handleChange('level_5', e.target.value)}
+                  placeholder="e.g., 888-999"
+                />
+              </div>
             <div className="form-group">
-              <label>Increment Percentage *</label>
-              <input
-                type="number"
-                step="0.1"
-                value={formData.increment_percentage || 0.1}
-                onChange={(e) => handleChange('increment_percentage', parseFloat(e.target.value))}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Level 1</label>
-              <input
-                type="text"
-                value={formData.level_1 || ''}
-                onChange={(e) => handleChange('level_1', e.target.value)}
-                placeholder="e.g., 111-222"
-              />
-            </div>
-            <div className="form-group">
-              <label>Level 2</label>
-              <input
-                type="text"
-                value={formData.level_2 || ''}
-                onChange={(e) => handleChange('level_2', e.target.value)}
-                placeholder="e.g., 222-333"
-              />
-            </div>
-            <div className="form-group">
-              <label>Level 3</label>
-              <input
-                type="text"
-                value={formData.level_3 || ''}
-                onChange={(e) => handleChange('level_3', e.target.value)}
-                placeholder="e.g., 333-555"
-              />
-            </div>
-            <div className="form-group">
-              <label>Level 4</label>
-              <input
-                type="text"
-                value={formData.level_4 || ''}
-                onChange={(e) => handleChange('level_4', e.target.value)}
-                placeholder="e.g., 555-888"
-              />
-            </div>
-            <div className="form-group">
-              <label>Level 5</label>
-              <input
-                type="text"
-                value={formData.level_5 || ''}
-                onChange={(e) => handleChange('level_5', e.target.value)}
-                placeholder="e.g., 888-999"
-              />
-            </div>
-            <div className="form-group">
-              <label>Details</label>
+              <label>Description *</label>
               <textarea
-                value={formData.details || ''}
-                onChange={(e) => handleChange('details', e.target.value)}
+                value={formData.description || ''}
+                onChange={(e) => handleChange('description', e.target.value)}
                 rows="3"
                 placeholder="Additional details about the jackpot"
+                required
               />
             </div>
           </>
@@ -3203,12 +3430,12 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
     </div>
   );
 };
-
 // User Edit Form Component
-const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
+const UserEditForm = ({ user, onSave, onClose, companies, locations, showCustomNotification }) => {
   const [formData, setFormData] = useState({
     username: user?.username || '',
     email: user?.email || '',
+    phone: user?.phone || '',
     first_name: user?.first_name || '',
     last_name: user?.last_name || '',
     role: user?.role || 'operator',
@@ -3436,6 +3663,15 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
                 />
               </div>
               <div className="form-group">
+                <label>📞 Phone</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="Enter phone number"
+                />
+              </div>
+              <div className="form-group">
                 <label>First Name</label>
                 <input
                   type="text"
@@ -3496,6 +3732,7 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
                   entityId={user.id}
                   currentAvatar={avatar}
                   onAvatarChange={handleAvatarChange}
+                  showCustomNotification={showCustomNotification}
                 />
               </div>
             </div>
@@ -3648,7 +3885,6 @@ const UserEditForm = ({ user, onSave, onClose, companies, locations }) => {
     </div>
   );
 };
-
 // Dashboard Component
 const Dashboard = () => {
   const { user, logout } = useAuth();
@@ -3719,6 +3955,29 @@ const Dashboard = () => {
   const [showSlotAttachmentsModal, setShowSlotAttachmentsModal] = useState(false);
   const [selectedSlotId, setSelectedSlotId] = useState(null);
 
+  // CVT attachments modal state
+  const [showCvtAttachments, setShowCvtAttachments] = useState(false);
+  const [selectedCvtForAttachments, setSelectedCvtForAttachments] = useState(null);
+
+  // Bulk delete confirmation modal state
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [bulkDeleteType, setBulkDeleteType] = useState('');
+  
+  // Individual delete confirmation modal state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [fileToDelete, setFileToDelete] = useState(null);
+
+  // Metrology popup state
+  const [selectedMetrology, setSelectedMetrology] = useState(null);
+  
+  // Metrology search state
+  const [metrologySearchTerm, setMetrologySearchTerm] = useState('');
+
+  // Notification system state
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationType, setNotificationType] = useState('success'); // 'success', 'error', 'warning', 'info'
+
   // User avatar hook
   const { avatar } = useAvatar('users', user?.id);
 
@@ -3731,6 +3990,16 @@ const Dashboard = () => {
   useEffect(() => {
     localStorage.setItem('activeView', activeView);
   }, [activeView]);
+
+  // Custom notification function
+  const showCustomNotification = (message, type = 'success') => {
+    setNotificationMessage(message);
+    setNotificationType(type);
+    setShowNotification(true);
+    setTimeout(() => {
+      setShowNotification(false);
+    }, 4000);
+  };
 
   useEffect(() => {
     fetchDashboardData();
@@ -3801,6 +4070,20 @@ const Dashboard = () => {
   const handleSlotStatusChange = async (slot, newStatus) => {
     if (slot.status === newStatus) return;
     
+    // If setting to inactive, show confirmation dialog
+    if (newStatus === 'inactive') {
+      const confirmed = window.confirm(
+        `⚠️ ATENȚIE!\n\n` +
+        `Slot-ul "${slot.serial_number}" va fi setat ca INACTIV.\n\n` +
+        `Acest slot va dispărea din lista de Slot Machines și va fi mutat în Warehouse.\n\n` +
+        `Doriți să continuați?`
+      );
+      
+      if (!confirmed) {
+        return; // User cancelled
+      }
+    }
+    
     try {
       const token = localStorage.getItem('token');
       
@@ -3833,15 +4116,22 @@ const Dashboard = () => {
         // Force refresh all data
         await fetchDashboardData();
         
-        // Show success message
-        const statusText = newStatus === 'active' ? 'activ' : 'inactiv';
-        alert(`✅ Status slot actualizat cu succes la: ${statusText}`);
+        // Show success message with specific info for inactive status
+        if (newStatus === 'inactive') {
+          showCustomNotification(
+            `✅ Slot "${slot.serial_number}" setat ca INACTIV și mutat în Warehouse!`, 
+            'success'
+          );
+        } else {
+          const statusText = newStatus === 'active' ? 'activ' : 'inactiv';
+          showCustomNotification(`✅ Status slot actualizat cu succes la: ${statusText}`, 'success');
+        }
       } else {
         const errorData = await response.json();
-        alert(`Eroare la actualizare: ${errorData.detail || 'Eroare necunoscută'}`);
+        showCustomNotification(`Eroare la actualizare: ${errorData.detail || 'Eroare necunoscută'}`, 'error');
       }
     } catch (error) {
-      alert('Eroare de conexiune: ' + error.message);
+      showCustomNotification('Eroare de conexiune: ' + error.message, 'error');
     }
   };
 
@@ -3878,9 +4168,15 @@ const Dashboard = () => {
 
   const handleSaveUser = async (userData) => {
     try {
+      console.log('👤 Saving user data:', userData);
+      console.log('📞 Phone field:', userData.phone);
+      
       const token = localStorage.getItem('token');
       const method = editingUser ? 'PUT' : 'POST';
       const url = editingUser ? `${API}/users/${editingUser.id}` : `${API}/users`;
+      
+      console.log('🌐 URL:', url);
+      console.log('📋 Method:', method);
       
       const response = await fetch(url, {
         method,
@@ -3892,16 +4188,21 @@ const Dashboard = () => {
       });
 
       if (response.ok) {
+        const responseData = await response.json();
+        console.log('✅ Server response:', responseData);
+        console.log('📞 Phone in response:', responseData.phone);
+        
         await fetchDashboardData(); // Refresh data
         handleCloseUserForm();
-        alert('✅ User saved successfully!');
+        showCustomNotification('✅ User saved successfully!', 'success');
       } else {
         const errorData = await response.json();
-        alert(`❌ Failed to save user: ${errorData.detail || 'Unknown error'}`);
+        console.error('❌ Server error:', errorData);
+        showCustomNotification(`❌ Failed to save user: ${errorData.detail || 'Unknown error'}`, 'error');
         console.error('Failed to save user');
       }
     } catch (error) {
-      alert(`❌ Error saving user: ${error.message}`);
+      showCustomNotification(`❌ Error saving user: ${error.message}`, 'error');
       console.error('Error saving user:', error);
     }
   };
@@ -3960,6 +4261,17 @@ const Dashboard = () => {
         console.log('📍 Location ID:', entityData.location_id);
       }
       
+      // Debug: Log the data being saved for jackpots
+      if (entityType === 'jackpots') {
+        console.log('🎰 Saving jackpot data:', entityData);
+        console.log('🔍 Fields present:', Object.keys(entityData));
+        console.log('🔢 Serial number:', entityData.serial_number);
+        console.log('🏷️ Jackpot name:', entityData.jackpot_name);
+        console.log('📊 Jackpot type:', entityData.jackpot_type);
+                  console.log('📊 Increment rate:', entityData.increment_rate);
+        console.log('📝 Description:', entityData.description);
+      }
+      
       const token = localStorage.getItem('token');
       const method = editingEntity ? 'PUT' : 'POST';
       const endpoint = getEntityEndpoint(entityType);
@@ -3983,21 +4295,30 @@ const Dashboard = () => {
         console.log('✅ Save successful, response data:', responseData);
         await fetchDashboardData(); // Refresh data
         handleCloseEntityForm();
-        alert(`✅ ${getEntityDisplayName(entityType)} saved successfully!`);
+        showCustomNotification(`✅ ${getEntityDisplayName(entityType)} saved successfully!`, 'success');
       } else {
         const error = await response.json();
         console.error('❌ Failed to save entity:', error);
         console.error('📡 Response status:', response.status, response.statusText);
-        alert(`❌ Failed to save ${getEntityDisplayName(entityType)}: ${error.detail || 'Unknown error'}`);
+                  showCustomNotification(`❌ Failed to save ${getEntityDisplayName(entityType)}: ${error.detail || 'Unknown error'}`, 'error');
       }
     } catch (error) {
       console.error('Error saving entity:', error);
-      alert(`❌ Error saving ${getEntityDisplayName(entityType)}: ${error.message}`);
+              showCustomNotification(`❌ Error saving ${getEntityDisplayName(entityType)}: ${error.message}`, 'error');
     }
   };
 
   const handleDeleteEntity = async (entityId, type) => {
-    console.log('🔥 DELETING DIRECTLY:', entityId, type);
+    console.log('🔥 DELETE REQUESTED:', entityId, type);
+    
+    // Set the item to delete and show confirmation modal
+    setFileToDelete({ id: entityId, type: type });
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteEntity = async () => {
+    const { id: entityId, type } = fileToDelete;
+    console.log('🔥 CONFIRMING DELETE:', entityId, type);
 
     try {
       const token = localStorage.getItem('token');
@@ -4013,17 +4334,25 @@ const Dashboard = () => {
 
       if (response.ok) {
         console.log('✅ Delete successful, refreshing data...');
-        alert('✅ Item deleted successfully!');
+        showCustomNotification('✅ Item deleted successfully!', 'success');
         await fetchDashboardData(); // Refresh data
       } else {
         const error = await response.json();
         console.error('❌ DELETE Failed:', error);
-        alert('❌ Failed to delete: ' + (error.detail || 'Unknown error'));
+        showCustomNotification('❌ Failed to delete: ' + (error.detail || 'Unknown error'), 'error');
       }
     } catch (error) {
       console.error('💥 Delete exception:', error);
-      alert('❌ Error deleting: ' + error.message);
+      showCustomNotification('❌ Error deleting: ' + error.message, 'error');
+    } finally {
+      setShowDeleteConfirm(false);
+      setFileToDelete(null);
     }
+  };
+
+  const cancelDeleteEntity = () => {
+    setShowDeleteConfirm(false);
+    setFileToDelete(null);
   };
 
   const getEntityEndpoint = (type) => {
@@ -4046,7 +4375,7 @@ const Dashboard = () => {
   // Bulk Edit Handler
   const handleBulkEdit = (entityType) => {
     if (selectedItems.length === 0) {
-      alert('Please select items to bulk edit');
+              showCustomNotification('Please select items to bulk edit', 'warning');
       return;
     }
     setBulkEditType(entityType);
@@ -4057,12 +4386,23 @@ const Dashboard = () => {
   const handleBulkDelete = async (entityType) => {
     console.log('🔥 BULK DELETE CLICKED:', entityType);
     console.log('🔥 Selected items:', selectedItems);
+    console.log('🔥 Selected items length:', selectedItems.length);
     
     if (selectedItems.length === 0) {
-      alert('❌ Please select items to delete first!');
+      showCustomNotification('❌ Please select items to delete first!', 'error');
       return;
     }
 
+    // Show confirmation modal instead of browser confirm
+    console.log('🔥 Setting bulk delete modal to show');
+    setBulkDeleteType(entityType);
+    setShowBulkDeleteConfirm(true);
+    console.log('🔥 Modal should be visible now');
+  };
+
+  const confirmBulkDelete = async () => {
+    const entityType = bulkDeleteType;
+    console.log('🔥 Confirming bulk delete for:', entityType);
     try {
       console.log('🚀 Starting bulk delete...');
       const endpoint = getEntityEndpoint(entityType);
@@ -4086,15 +4426,24 @@ const Dashboard = () => {
         }
       }
 
-      alert(`✅ Successfully deleted ${successCount} of ${selectedItems.length} items!`);
+      showCustomNotification(`✅ Successfully deleted ${successCount} of ${selectedItems.length} items!`, 'success');
       await fetchDashboardData();
       setSelectedItems([]);
       console.log('🔄 Data refreshed, selections cleared');
       
     } catch (error) {
       console.error('💥 Bulk delete error:', error);
-      alert('❌ Bulk delete failed: ' + error.message);
+      showCustomNotification('❌ Bulk delete failed: ' + error.message, 'error');
+    } finally {
+      setShowBulkDeleteConfirm(false);
+      setBulkDeleteType('');
     }
+  };
+
+  const cancelBulkDelete = () => {
+    console.log('🔥 Canceling bulk delete');
+    setShowBulkDeleteConfirm(false);
+    setBulkDeleteType('');
   };
 
   // Bulk Duplicate Handler for Slots
@@ -4103,12 +4452,12 @@ const Dashboard = () => {
     console.log('🔄 Selected items:', selectedItems);
     
     if (selectedItems.length === 0) {
-      alert('❌ Please select items to duplicate first!');
+      showCustomNotification('❌ Please select items to duplicate first!', 'error');
       return;
     }
 
     if (entityType !== 'slots') {
-      alert('❌ Duplication is only available for slots!');
+      showCustomNotification('❌ Duplication is only available for slots!', 'error');
       return;
     }
 
@@ -4178,14 +4527,14 @@ const Dashboard = () => {
         }
       }
 
-      alert(`✅ Successfully duplicated ${successCount} of ${selectedItems.length} slots!`);
+              showCustomNotification(`✅ Successfully duplicated ${successCount} of ${selectedItems.length} slots!`, 'success');
       await fetchDashboardData();
       setSelectedItems([]);
       console.log('🔄 Data refreshed, selections cleared');
       
     } catch (error) {
       console.error('💥 Bulk duplicate error:', error);
-      alert('❌ Bulk duplicate failed: ' + error.message);
+              showCustomNotification('❌ Bulk duplicate failed: ' + error.message, 'error');
     }
   };
 
@@ -4246,9 +4595,9 @@ const Dashboard = () => {
       const successCount = results.filter(Boolean).length;
       
       if (successCount === selectedItems.length) {
-        alert(`✅ Successfully updated ${successCount} ${getEntityDisplayName(bulkEditType)} items!`);
+        showCustomNotification(`✅ Successfully updated ${successCount} ${getEntityDisplayName(bulkEditType)} items!`, 'success');
       } else {
-        alert(`⚠️ Updated ${successCount} of ${selectedItems.length} items. Some updates failed.`);
+                  showCustomNotification(`⚠️ Updated ${successCount} of ${selectedItems.length} items. Some updates failed.`, 'warning');
       }
 
       await fetchDashboardData();
@@ -4256,7 +4605,7 @@ const Dashboard = () => {
       setSelectedItems([]);
     } catch (error) {
       console.error('Bulk edit error:', error);
-      alert(`❌ Bulk edit failed: ${error.message}`);
+              showCustomNotification(`❌ Bulk edit failed: ${error.message}`, 'error');
     }
   };
 
@@ -4278,7 +4627,7 @@ const Dashboard = () => {
     const exportData = data[entityType] || [];
     
     if (exportData.length === 0) {
-      alert('No data to export');
+      showCustomNotification('No data to export', 'warning');
       return;
     }
 
@@ -4324,9 +4673,8 @@ const Dashboard = () => {
     const fileName = `${entityType}_export_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
     
-    alert(`✅ ${exportData.length} ${getEntityDisplayName(entityType)} items exported to Excel successfully!`);
+            showCustomNotification(`✅ ${exportData.length} ${getEntityDisplayName(entityType)} items exported to Excel successfully!`, 'success');
   };
-
   // Import Handler - Excel Format
   const handleImport = (entityType) => {
     const input = document.createElement('input');
@@ -4344,7 +4692,7 @@ const Dashboard = () => {
         const importData = XLSX.utils.sheet_to_json(worksheet);
         
         if (importData.length === 0) {
-          alert('No data found in Excel file');
+          showCustomNotification('No data found in Excel file', 'error');
           return;
         }
         
@@ -4355,26 +4703,27 @@ const Dashboard = () => {
         );
         
         if (missingFields.length > 0) {
-          alert(`Missing required columns: ${missingFields.join(', ')}`);
+                      showCustomNotification(`Missing required columns: ${missingFields.join(', ')}`, 'error');
           return;
         }
         
         // Show preview and confirm import
-        const confirmImport = confirm(
-          `Found ${importData.length} rows in Excel file.\n\n` +
-          `Sample data:\n${JSON.stringify(importData[0], null, 2)}\n\n` +
-          `Proceed with import?`
-        );
+                  // Show import confirmation notification instead of browser confirm
+          showCustomNotification(
+            `Found ${importData.length} rows in Excel file. Proceed with import?`,
+            'info'
+          );
+          const confirmImport = true; // Always proceed for now
         
         if (confirmImport) {
           // Process import (for now, just show success - actual API calls would go here)
           console.log(`Importing ${importData.length} ${entityType}:`, importData);
-          alert(`✅ Ready to import ${importData.length} ${getEntityDisplayName(entityType)} items!\n\n(Note: Actual import functionality would process these items through the API)`);
+          showCustomNotification(`✅ Ready to import ${importData.length} ${getEntityDisplayName(entityType)} items!\n\n(Note: Actual import functionality would process these items through the API)`, 'success');
         }
         
       } catch (error) {
         console.error('Import error:', error);
-        alert(`❌ Error reading Excel file: ${error.message}`);
+                  showCustomNotification(`❌ Error reading Excel file: ${error.message}`, 'error');
       }
     };
     input.click();
@@ -4414,7 +4763,7 @@ const Dashboard = () => {
       legal: ['document_type', 'title'],
       users: ['username', 'email', 'first_name', 'last_name', 'role'],
       metrology: ['serial_number', 'certificate_number', 'issue_date'],
-      jackpots: ['serial_number', 'jackpot_type', 'current_amount']
+              jackpots: ['serial_number', 'jackpot_type', 'increment_rate', 'description']
     };
     return fields[entityType] || ['name'];
   };
@@ -4507,6 +4856,24 @@ const Dashboard = () => {
     setSelectedSlotId(null);
   };
 
+  const handleOpenCvtAttachments = (cvtId) => {
+    setSelectedCvtForAttachments(cvtId);
+    setShowCvtAttachments(true);
+  };
+
+  const handleCloseCvtAttachments = () => {
+    setShowCvtAttachments(false);
+    setSelectedCvtForAttachments(null);
+  };
+
+  const handleMetrologyClick = (metrologyData) => {
+    setSelectedMetrology(metrologyData);
+  };
+
+  const handleCloseMetrologyPopup = () => {
+    setSelectedMetrology(null);
+  };
+
   const renderTable = (title, data, columns, actions, entityType) => {
     // Apply search filter
     let filteredData = filterData(data, searchTerm);
@@ -4572,7 +4939,9 @@ const Dashboard = () => {
     return (
       <div className="table-container">
         <div className="table-header">
-          <h2>{title}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2>{title}</h2>
+          </div>
           <div className="table-actions">
             <div className="search-container">
               <input
@@ -4767,19 +5136,21 @@ const Dashboard = () => {
                               onClick={() => actions?.onEdit && actions.onEdit(item)}
                               title="Edit"
                               style={{ 
-                                fontSize: '14px', 
+                                fontSize: '12px', 
                                 padding: '2px 4px',
-                                display: 'flex',
+                                display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                width: '24px',
-                                height: '24px',
+                                width: '32px',
+                                height: '32px',
                                 border: 'none',
-                                background: 'transparent',
+                                backgroundColor: '#d1e7ff',
+                                borderRadius: '50%',
+                                color: '#1e3a8a',
                                 cursor: 'pointer'
                               }}
                             >
-                              📝
+                              ✏️
                             </button>
                             <button 
                               className="btn-delete"
@@ -4788,17 +5159,19 @@ const Dashboard = () => {
                                 e.stopPropagation();
                                 handleDeleteEntity(item.id, entityType);
                               }}
-                              title="Delete"
+                              title={`Delete ${entityType === 'slots' ? 'Slot Machine' : entityType === 'metrology' ? 'CVT Record' : entityType === 'companies' ? 'Company' : entityType === 'locations' ? 'Location' : entityType === 'providers' ? 'Provider' : entityType === 'cabinets' ? 'Cabinet' : entityType === 'gamemixes' ? 'Game Mix' : entityType === 'jackpots' ? 'Jackpot' : entityType === 'invoices' ? 'Invoice' : entityType === 'onjn' ? 'ONJN Report' : entityType === 'legal' ? 'Legal Document' : entityType === 'users' ? 'User' : 'Record'}`}
                               style={{ 
-                                fontSize: '14px', 
+                                fontSize: '12px', 
                                 padding: '2px 4px',
-                                display: 'flex',
+                                display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                width: '24px',
-                                height: '24px',
+                                width: '32px',
+                                height: '32px',
                                 border: 'none',
-                                background: 'transparent',
+                                backgroundColor: '#d1e7ff',
+                                borderRadius: '50%',
+                                color: '#1e3a8a',
                                 cursor: 'pointer'
                               }}
                             >
@@ -4847,14 +5220,31 @@ const Dashboard = () => {
                           )}
                         </div>
                       ) : (
-                      <div className="table-row-actions">
+                      <div className="table-row-actions" style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
                         <button 
                           className="btn-edit"
                           onClick={() => actions?.onEdit && actions.onEdit(item)}
-                          title="Edit"
-                            style={{ fontSize: '14px', padding: '2px 4px' }}
+                          title={`Edit ${entityType === 'slots' ? 'Slot Machine' : entityType === 'metrology' ? 'CVT Record' : entityType === 'companies' ? 'Company' : entityType === 'locations' ? 'Location' : entityType === 'providers' ? 'Provider' : entityType === 'cabinets' ? 'Cabinet' : entityType === 'gamemixes' ? 'Game Mix' : entityType === 'jackpots' ? 'Jackpot' : entityType === 'invoices' ? 'Invoice' : entityType === 'onjn' ? 'ONJN Report' : entityType === 'legal' ? 'Legal Document' : entityType === 'users' ? 'User' : 'Record'}`}
+                          style={{ 
+                            fontSize: '12px', 
+                            padding: '2px 4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '32px',
+                            height: '32px',
+                            backgroundColor: '#d1e7ff',
+                            borderRadius: '50%',
+                            color: '#1e3a8a',
+                            border: 'none',
+                            cursor: 'pointer'
+                          }}
                         >
-                            📝
+                            ✏️
                         </button>
                         <button 
                           className="btn-delete"
@@ -4863,21 +5253,49 @@ const Dashboard = () => {
                             e.stopPropagation();
                             handleDeleteEntity(item.id, entityType);
                           }}
-                          title="Delete"
-                            style={{ fontSize: '14px', padding: '2px 4px' }}
+                          title={`Delete ${entityType === 'slots' ? 'Slot Machine' : entityType === 'metrology' ? 'CVT Record' : entityType === 'companies' ? 'Company' : entityType === 'locations' ? 'Location' : entityType === 'providers' ? 'Provider' : entityType === 'cabinets' ? 'Cabinet' : entityType === 'gamemixes' ? 'Game Mix' : entityType === 'jackpots' ? 'Jackpot' : entityType === 'invoices' ? 'Invoice' : entityType === 'onjn' ? 'ONJN Report' : entityType === 'legal' ? 'Legal Document' : entityType === 'users' ? 'User' : 'Record'}`}
+                          style={{ 
+                            fontSize: '12px', 
+                            padding: '2px 4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '32px',
+                            height: '32px',
+                            backgroundColor: '#d1e7ff',
+                            borderRadius: '50%',
+                            color: '#1e3a8a',
+                            border: 'none',
+                            cursor: 'pointer'
+                          }}
                         >
                             🗑️
                         </button>
                           {/* Attachment indicator with count */}
-                          <div style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: '4px',
-                            cursor: 'pointer'
-                          }} title="Atașamente">
-                            <span style={{fontSize:'1.1em'}}>🔗</span>
-                            {/* Attachment count will be displayed when data is available */}
-                          </div>
+                          <button 
+                            className="btn-attachment"
+                            title={`View Attachments for ${entityType === 'slots' ? 'Slot Machine' : entityType === 'metrology' ? 'CVT Record' : entityType === 'companies' ? 'Company' : entityType === 'locations' ? 'Location' : entityType === 'providers' ? 'Provider' : entityType === 'cabinets' ? 'Cabinet' : entityType === 'gamemixes' ? 'Game Mix' : entityType === 'jackpots' ? 'Jackpot' : entityType === 'invoices' ? 'Invoice' : entityType === 'onjn' ? 'ONJN Report' : entityType === 'legal' ? 'Legal Document' : entityType === 'users' ? 'User' : 'Record'}`}
+                            onClick={() => {
+                              // Handle attachment click
+                              console.log('Attachment clicked for', entityType, item.id);
+                            }}
+                            style={{ 
+                              fontSize: '14px', 
+                              padding: '2px 4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '32px',
+                              height: '32px',
+                              backgroundColor: '#d1e7ff',
+                              borderRadius: '50%',
+                              color: '#1e3a8a',
+                              border: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📎
+                          </button>
                       </div>
                       )}
                     </td>
@@ -4901,21 +5319,21 @@ const Dashboard = () => {
       {stats && (
         <div className="stats-grid">
           <div className="stat-card clickable" onClick={() => setActiveView('companies')}>
-            <div className="stat-icon" style={{ backgroundColor: '#3b82f6' }}>📊</div>
+            <div className="stat-icon" style={{ backgroundColor: '#3182ce' }}>📊</div>
             <div className="stat-content">
               <h3>Total Companies</h3>
               <p className="stat-value">{stats.total_companies}</p>
             </div>
           </div>
           <div className="stat-card clickable" onClick={() => setActiveView('locations')}>
-            <div className="stat-icon" style={{ backgroundColor: '#10b981' }}>📍</div>
+            <div className="stat-icon" style={{ backgroundColor: '#3182ce' }}>📍</div>
             <div className="stat-content">
               <h3>Total Locations</h3>
               <p className="stat-value">{stats.total_locations}</p>
             </div>
           </div>
           <div className="stat-card clickable" onClick={() => setActiveView('providers')}>
-            <div className="stat-icon" style={{ backgroundColor: '#f59e0b' }}>🎮</div>
+            <div className="stat-icon" style={{ backgroundColor: '#3182ce' }}>🎮</div>
             <div className="stat-content">
               <h3>Gaming Providers</h3>
               <p className="stat-value">{stats.total_providers}</p>
@@ -4943,14 +5361,14 @@ const Dashboard = () => {
             </div>
           </div>
           <div className="stat-card clickable" onClick={() => setActiveView('invoices')}>
-            <div className="stat-icon" style={{ backgroundColor: '#f59e0b' }}>💰</div>
+            <div className="stat-icon" style={{ backgroundColor: '#3182ce' }}>💰</div>
             <div className="stat-content">
               <h3>Invoices</h3>
               <p className="stat-value">{stats.total_invoices}</p>
             </div>
           </div>
           <div className="stat-card clickable" onClick={() => setActiveView('onjn')}>
-            <div className="stat-icon" style={{ backgroundColor: '#10b981' }}>📋</div>
+            <div className="stat-icon" style={{ backgroundColor: '#3182ce' }}>📋</div>
             <div className="stat-content">
               <h3>ONJN Reports</h3>
               <p className="stat-value">{stats.total_onjn_reports}</p>
@@ -4998,7 +5416,6 @@ const Dashboard = () => {
       )}
     </div>
   );
-
   // Invoice Popup Component
   const InvoicePopup = ({ invoice, onClose }) => {
     if (!invoice) return null;
@@ -5119,7 +5536,24 @@ const Dashboard = () => {
       <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
-            <h2>Jackpot Details</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h2>Jackpot Details</h2>
+              <div style={{
+                backgroundColor: '#3182ce',
+                color: 'white',
+                borderRadius: '50%',
+                width: '28px',
+                height: '28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                minWidth: '28px'
+              }}>
+                {jackpots.length}
+              </div>
+            </div>
             <button className="modal-close" onClick={onClose}>×</button>
           </div>
           <div className="modal-body">
@@ -5135,40 +5569,50 @@ const Dashboard = () => {
                 <div className="jackpot-details">
                   <div>
                     <div className="detail-label">Serial Numbers</div>
-                    <div className="detail-value">{jackpot.serial_numbers || 'N/A'}</div>
+                    <div className="detail-value">{jackpot.serial_number || 'N/A'}</div>
                   </div>
                   
                   <div>
                     <div className="detail-label">Increment Percentage</div>
                     <div className="detail-value">
-                      {typeof jackpot.increment_percentage === 'number' ? `${jackpot.increment_percentage}%` : 'N/A'}
+                      {typeof jackpot.increment_rate === 'number' ? `${jackpot.increment_rate}%` : 'N/A'}
                     </div>
                   </div>
                   
-                  <div>
-                    <div className="detail-label">Level 1</div>
-                    <div className="detail-value">{jackpot.level_1 || 'N/A'}</div>
-                  </div>
+                  {jackpot.level_1 && (
+                    <div>
+                      <div className="detail-label">Level 1</div>
+                      <div className="detail-value">{jackpot.level_1}</div>
+                    </div>
+                  )}
                   
-                  <div>
-                    <div className="detail-label">Level 2</div>
-                    <div className="detail-value">{jackpot.level_2 || 'N/A'}</div>
-                  </div>
+                  {jackpot.level_2 && (
+                    <div>
+                      <div className="detail-label">Level 2</div>
+                      <div className="detail-value">{jackpot.level_2}</div>
+                    </div>
+                  )}
                   
-                  <div>
-                    <div className="detail-label">Level 3</div>
-                    <div className="detail-value">{jackpot.level_3 || 'N/A'}</div>
-                  </div>
+                  {jackpot.level_3 && (
+                    <div>
+                      <div className="detail-label">Level 3</div>
+                      <div className="detail-value">{jackpot.level_3}</div>
+                    </div>
+                  )}
                   
-                  <div>
-                    <div className="detail-label">Level 4</div>
-                    <div className="detail-value">{jackpot.level_4 || 'N/A'}</div>
-                  </div>
+                  {jackpot.level_4 && (
+                    <div>
+                      <div className="detail-label">Level 4</div>
+                      <div className="detail-value">{jackpot.level_4}</div>
+                    </div>
+                  )}
                   
-                  <div>
-                    <div className="detail-label">Level 5</div>
-                    <div className="detail-value">{jackpot.level_5 || 'N/A'}</div>
-                  </div>
+                  {jackpot.level_5 && (
+                    <div>
+                      <div className="detail-label">Level 5</div>
+                      <div className="detail-value">{jackpot.level_5}</div>
+                    </div>
+                  )}
                   
                   <div>
                     <div className="detail-label">Created Date</div>
@@ -5198,7 +5642,24 @@ const Dashboard = () => {
       <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
-            <h2>Invoice Slot Details</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h2>Invoice Slot Details</h2>
+              <div style={{
+                backgroundColor: '#3182ce',
+                color: 'white',
+                borderRadius: '50%',
+                width: '28px',
+                height: '28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                minWidth: '28px'
+              }}>
+                {slots.length}
+              </div>
+            </div>
             <button className="modal-close" onClick={onClose}>×</button>
           </div>
           <div className="modal-body">
@@ -5278,8 +5739,134 @@ const Dashboard = () => {
         </div>
       </div>
     );
-  };
+    };
+  
+  // Metrology Popup Component
+  const MetrologyPopup = ({ metrology, onClose }) => {
+    const [metrologySearchTerm, setMetrologySearchTerm] = useState('');
 
+    const filteredMetrology = filterData(metrology, metrologySearchTerm);
+
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h2>Metrology Details</h2>
+              <div style={{
+                backgroundColor: '#3182ce',
+                color: 'white',
+                borderRadius: '50%',
+                width: '28px',
+                height: '28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                minWidth: '28px'
+              }}>
+                {filteredMetrology.length}
+              </div>
+            </div>
+            <button className="modal-close" onClick={onClose}>×</button>
+          </div>
+          <div className="modal-body">
+            <input
+              type="text"
+              value={metrologySearchTerm}
+              onChange={e => setMetrologySearchTerm(e.target.value)}
+              placeholder="Search..."
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                fontSize: '1em',
+                minWidth: 180,
+                marginLeft: 8
+              }}
+            />
+            {filteredMetrology.map((item, index) => (
+              <div key={item.id} className="jackpot-item">
+                <div className="jackpot-header">
+                  <h3>Certificate: {item.certificate_number || 'No Certificate Number'}</h3>
+                  <span className={`jackpot-type ${item.certificate_type?.toLowerCase()}`}>
+                    {item.certificate_type || 'Unknown Type'}
+                  </span>
+                </div>
+                
+                <div className="jackpot-details">
+                  <div>
+                    <div className="detail-label">Serial Numbers</div>
+                    <div className="detail-value">{item.serial_number || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Issue Date</div>
+                    <div className="detail-value">
+                      {item.issue_date ? new Date(item.issue_date).toLocaleDateString() : 'N/A'}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Expiry Date</div>
+                    <div className="detail-value">
+                      {item.expiry_date ? new Date(item.expiry_date).toLocaleDateString() : 'N/A'}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Issuing Authority</div>
+                    <div className="detail-value">{item.issuing_authority || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Calibration Interval</div>
+                    <div className="detail-value">{item.calibration_interval ? `${item.calibration_interval} months` : 'N/A'}</div>
+                  </div>
+                  
+                  {item.cvt_type && (
+                    <div>
+                      <div className="detail-label">CVT Type</div>
+                      <div className="detail-value">{item.cvt_type}</div>
+                    </div>
+                  )}
+                  
+                  {item.cvt_expiry_date && (
+                    <div>
+                      <div className="detail-label">CVT Expiry Date</div>
+                      <div className="detail-value">
+                        {new Date(item.cvt_expiry_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div>
+                    <div className="detail-label">Status</div>
+                    <div className="detail-value">{item.status || 'N/A'}</div>
+                  </div>
+                  
+                  <div>
+                    <div className="detail-label">Created Date</div>
+                    <div className="detail-value">
+                      {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A'}
+                    </div>
+                  </div>
+                </div>
+                
+                {item.description && (
+                  <div className="jackpot-description">
+                    <div className="detail-label">Description</div>
+                    <div className="detail-value">{item.description}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
   // Add CVT Date Popup Component
   const AddCvtDatePopup = ({ onClose }) => {
     const [formData, setFormData] = useState({
@@ -5382,12 +5969,12 @@ const Dashboard = () => {
         });
 
         await Promise.all(promises);
-        alert(`✅ Successfully created CVT records for ${serialNumbers.length} slot(s)!`);
+        showCustomNotification(`✅ Successfully created CVT records for ${serialNumbers.length} slot(s)!`, 'success');
         onClose();
         fetchDashboardData(); // Refresh data
       } catch (error) {
         console.error('Error creating CVT records:', error);
-        alert(`❌ Error creating CVT records: ${error.message}`);
+        showCustomNotification(`❌ Error creating CVT records: ${error.message}`, 'error');
       } finally {
         setIsSubmitting(false);
       }
@@ -6066,7 +6653,7 @@ const Dashboard = () => {
                 alignItems: 'center',
                 gap: '8px'
               }}>
-                🎰 Available Slots ({filteredSlots.length})
+                🎰 Available Slots
               </h3>
               <div style={{ 
                 maxHeight: '300px', 
@@ -6325,19 +6912,19 @@ const Dashboard = () => {
                   onClick={() => toggleProviderFilter(item.lease_provider_id)}
                   style={{ cursor: 'pointer' }}
                 >
-                  <span style={{fontSize:'1.1em'}}>📄</span> <strong>{rentProvider ? rentProvider.company_name : 'No Provider Selected'}</strong>
+                  <strong>{rentProvider ? rentProvider.company_name : 'No Provider Selected'}</strong>
                 </div>
                 <div className="property-secondary">
-                  <small 
-                    className={`clickable-filter ${selectedContractFilter === contractNumber ? 'active-filter' : ''}`}
-                    onClick={() => toggleContractFilter(contractNumber)}
-                    title={`Click to filter by contract: ${contractNumber}`}
-                  >
-                    📋 {contractNumber}
-                  </small>
+                                      <small 
+                      className={`clickable-filter ${selectedContractFilter === contractNumber ? 'active-filter' : ''}`}
+                      onClick={() => toggleContractFilter(contractNumber)}
+                      title={`Click to filter by contract: ${contractNumber}`}
+                    >
+                      {contractNumber}
+                    </small>
                   {item.production_year && (
                     <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                      🏭 {item.production_year}
+                      {item.production_year}
                     </small>
                   )}
                   {/* Afișează facturile asociate */}
@@ -6362,7 +6949,7 @@ const Dashboard = () => {
                               }}
                               title={`Click to filter by invoice: ${invoice.invoice_number}`}
                             >
-                              📄 {invoice.invoice_number}
+                              {invoice.invoice_number}
                             </small>
                           ))}
                         </div>
@@ -6385,13 +6972,13 @@ const Dashboard = () => {
                       onClick={() => toggleCompanyFilter(item.owner_company_id)}
                       style={{ cursor: 'pointer' }}
                     >
-                  <span style={{fontSize:'1.1em'}}>🏢</span> <strong>{company ? company.name : 'No Company Selected'}</strong>
+                  <strong>{company ? company.name : 'No Company Selected'}</strong>
                     </div>
                     <div className="property-secondary">
                   <small>Property Owned</small>
                   {item.production_year && (
                     <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                      🏭 {item.production_year}
+                      {item.production_year}
                     </small>
                   )}
                   {/* Afișează facturile asociate */}
@@ -6416,7 +7003,7 @@ const Dashboard = () => {
                               }}
                               title={`Click to filter by invoice: ${invoice.invoice_number}`}
                             >
-                              📄 {invoice.invoice_number}
+                              {invoice.invoice_number}
                             </small>
                           ))}
                         </div>
@@ -6442,7 +7029,7 @@ const Dashboard = () => {
                   onClick={() => toggleCompanyFilter(invoice.buyer_id)}
                       style={{ cursor: 'pointer' }}
                     >
-                  <span style={{fontSize:'1.1em'}}>🏢</span> <strong>{buyer ? buyer.name : 'Unknown Buyer'}</strong>
+                  <strong>{buyer ? buyer.name : 'Unknown Buyer'}</strong>
                     </div>
                     <div className="property-secondary">
                       <small 
@@ -6450,7 +7037,7 @@ const Dashboard = () => {
                     onClick={() => toggleInvoiceFilter(invoice.invoice_number)}
                     title={`Click to filter by invoice: ${invoice.invoice_number}`}
                   >
-                    📄 {invoice.invoice_number}
+                    {invoice.invoice_number}
                       </small>
                   {seller && (
                     <small style={{ marginLeft: '8px', color: 'var(--text-secondary)' }}>
@@ -6459,7 +7046,7 @@ const Dashboard = () => {
                   )}
                   {item.production_year && (
                     <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                      🏭 {item.production_year}
+                      {item.production_year}
                     </small>
                   )}
                     </div>
@@ -6469,12 +7056,12 @@ const Dashboard = () => {
           // 4. Dacă nu există nimic, fallback la Unknown
               return (
                 <div className="property-cell">
-              <div className="property-primary">❓ <strong>No Owner Info</strong></div>
+              <div className="property-primary"><strong>No Owner Info</strong></div>
               <div className="property-secondary">
                 <small>Serial: {item.serial_number || 'N/A'}</small>
                 {item.production_year && (
                   <small style={{ display: 'block', marginTop: '2px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                    🏭 {item.production_year}
+                    {item.production_year}
                   </small>
                 )}
                 {/* Afișează facturile asociate */}
@@ -6499,7 +7086,7 @@ const Dashboard = () => {
                             }}
                             title={`Click to filter by invoice: ${invoice.invoice_number}`}
                           >
-                            📄 {invoice.invoice_number}
+                            {invoice.invoice_number}
                           </small>
                         ))}
                       </div>
@@ -6611,29 +7198,42 @@ const Dashboard = () => {
           
           // Type colors
           const typeColors = {
-            'periodic': { bg: '#dbeafe', text: '#1e40af', icon: '🔄' },
-            'reparation': { bg: '#fef3c7', text: '#d97706', icon: '🔧' }
+            'periodic': { bg: '#dbeafe', text: '#1e40af', icon: '' },
+            'reparation': { bg: '#fef3c7', text: '#d97706', icon: '' }
           };
           
           const colorScheme = typeColors[cvtType] || { bg: '#f3f4f6', text: '#6b7280', icon: '❓' };
           
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {/* Row 1: CVT Type */}
+              {/* Row 1: CVT Type (Clickable) */}
               {cvtType && (
-                <div style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '4px 8px',
-                  borderRadius: '12px',
-                  backgroundColor: colorScheme.bg,
-                  color: colorScheme.text,
-                  fontSize: '0.85em',
-                  fontWeight: '500',
-                  width: 'fit-content'
-                }}>
-                  <span>{colorScheme.icon}</span>
+                <div 
+                  onClick={() => handleMetrologyClick([metrologyItem])}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '4px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: colorScheme.bg,
+                    color: colorScheme.text,
+                    fontSize: '0.85em',
+                    fontWeight: '500',
+                    width: 'fit-content',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.opacity = '0.8';
+                    e.target.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.opacity = '1';
+                    e.target.style.transform = 'scale(1)';
+                  }}
+                  title="Click to view all metrology details"
+                >
                   <span style={{ textTransform: 'capitalize' }}>{cvtType}</span>
                 </div>
               )}
@@ -6652,7 +7252,7 @@ const Dashboard = () => {
                     transition: 'background-color 0.2s'
                   }}
                 >
-                  📅 {new Date(cvtDate).toLocaleDateString()}
+                  {new Date(cvtDate).toLocaleDateString()}
                 </div>
               )}
               
@@ -6673,6 +7273,8 @@ const Dashboard = () => {
                   {daysLeft} days left
                 </div>
               )}
+              
+
             </div>
           );
         }
@@ -6683,45 +7285,80 @@ const Dashboard = () => {
         render: (item) => {
           // Caută toate jackpoturile care conțin serialul slotului
           const associatedJackpots = jackpots.filter(jp => {
-            if (!jp.serial_numbers) return false;
-            // Acceptă delimitare cu spațiu sau newline
-            const serials = jp.serial_numbers.split(/\s|\n/).filter(s => s.trim());
-            return serials.includes(item.serial_number);
+            if (!jp.serial_number) return false;
+            // Verifică dacă serial_number-ul slotului este conținut în serial_number-ul jackpot-ului
+            const jackpotSerialNumbers = jp.serial_number.split(/\s+/).filter(s => s.trim());
+            return jackpotSerialNumbers.includes(item.serial_number);
           });
           
           if (associatedJackpots.length === 0) {
             return <span style={{ color: '#aaa', fontStyle: 'italic' }}>No Jackpot</span>;
           }
           
-          // Dacă este un singur jackpot, afișează doar numele
+          // Dacă este un singur jackpot, afișează numele și nivelele
           if (associatedJackpots.length === 1) {
+            const jackpot = associatedJackpots[0];
+            const levels = [jackpot.level_1, jackpot.level_2, jackpot.level_3, jackpot.level_4, jackpot.level_5].filter(level => level && level.trim());
+            
+            // Procesează serial numbers pentru a limita la primele 10
+            let serialNumbersDisplay = '';
+            if (jackpot.serial_number) {
+              const serialNumbers = jackpot.serial_number.split(/\s+/).filter(s => s.trim());
+              if (serialNumbers.length <= 10) {
+                serialNumbersDisplay = serialNumbers.join(', ');
+              } else {
+                const first10 = serialNumbers.slice(0, 10).join(', ');
+                const remaining = serialNumbers.length - 10;
+                serialNumbersDisplay = `${first10} + ${remaining} more`;
+              }
+            }
+            
             return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ 
+                  color: '#3182ce', 
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  fontWeight: '500'
+                }} onClick={() => setSelectedJackpots(associatedJackpots)}>
+                  {jackpot.jackpot_name || 'No Name'}
+                </span>
+              </div>
+            );
+          }
+          
+          // Dacă sunt multiple jackpots, afișează "Multiple Jackpots" clicabil cu bulină optimizată
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0px' }}>
               <span style={{ 
-                color: '#007bff', 
+                color: '#3182ce', 
                 cursor: 'pointer',
                 textDecoration: 'underline',
                 fontWeight: '500'
               }} onClick={() => setSelectedJackpots(associatedJackpots)}>
-                {associatedJackpots[0].jackpot_name || 'No Name'}
+                Multiple Jackpots
               </span>
-            );
-          }
-          
-          // Dacă sunt multiple jackpots, afișează "Multiple Jackpots" clicabil
-          return (
-            <span style={{ 
-              color: '#007bff', 
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              fontWeight: '500'
-            }} onClick={() => setSelectedJackpots(associatedJackpots)}>
-              Multiple Jackpots ({associatedJackpots.length})
-            </span>
+              <div style={{
+                backgroundColor: '#3182ce',
+                color: 'white',
+                borderRadius: '50%',
+                width: '18px',
+                height: '18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                minWidth: '18px',
+                marginLeft: '0px'
+              }}>
+                {associatedJackpots.length}
+              </div>
+            </div>
           );
         }
       },
     ];
-
     switch (activeView) {
       case 'dashboard':
         return renderDashboard();
@@ -6742,7 +7379,6 @@ const Dashboard = () => {
             label: 'Email',
             render: (item) => (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '16px' }}>📧</span>
                 <span>{item.email || 'N/A'}</span>
               </div>
             )
@@ -6752,7 +7388,6 @@ const Dashboard = () => {
             label: 'Phone',
             render: (item) => (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '16px' }}>📞</span>
                 <span>{item.phone || 'N/A'}</span>
               </div>
             )
@@ -6801,7 +7436,7 @@ const Dashboard = () => {
                           contactUser.username}
                       </div>
                       <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
-                        📧 {contactUser.email || 'N/A'} | 📞 {contactUser.phone || 'N/A'}
+                        {contactUser.email || 'N/A'} | {contactUser.phone || 'N/A'}
                   </div>
                 </div>
               );
@@ -6814,7 +7449,7 @@ const Dashboard = () => {
                     {item.contact_person}
                   </div>
                   <div style={{ fontSize: '0.8em', color: 'var(--text-secondary)' }}>
-                    📧 {item.contact_email || 'N/A'} | 📞 {item.contact_phone || 'N/A'}
+                    {item.contact_email || 'N/A'} | {item.contact_phone || 'N/A'}
                   </div>
                 </div>
               ) : 'No contact person';
@@ -6888,7 +7523,7 @@ const Dashboard = () => {
         // Show only active slots (including those without status set)
         const activeSlots = slotMachines.filter(s => s.status !== 'inactive');
         const activeCount = activeSlots.length;
-        return renderTable(`Slot Machines (${activeCount} active)`, activeSlots, slotColumns, {
+        return renderTable(`Slot Machines`, activeSlots, slotColumns, {
           onAdd: () => handleAddEntity('slots'),
           onEdit: (item) => handleEditEntity(item, 'slots'),
           onDelete: (id) => handleDeleteEntity(id, 'slots'),
@@ -6903,7 +7538,7 @@ const Dashboard = () => {
         // Show only inactive slots
         const warehouseSlots = slotMachines.filter(s => s.status === 'inactive');
         const warehouseCount = warehouseSlots.length;
-        return renderTable(`Warehouse (${warehouseCount} inactive)`, warehouseSlots, slotColumns, {
+        return renderTable(`Warehouse`, warehouseSlots, slotColumns, {
           onAdd: () => handleAddEntity('slots'),
           onEdit: (item) => handleEditEntity(item, 'slots'),
           onDelete: (id) => handleDeleteEntity(id, 'slots'),
@@ -6934,11 +7569,45 @@ const Dashboard = () => {
         const selectedMetrologyItems = selectedItems.filter(id => metrology.some(item => item.id === id));
         const hasSelectedItems = selectedMetrologyItems.length > 0;
         
+        const filteredMetrology = filterData(metrology, metrologySearchTerm);
+        
         return (
           <div className="table-container">
             <div className="table-header">
-              <h2>Metrology 2 - CVT Data Administration</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <h2>Metrology 2 - CVT Data Administration</h2>
+                <div style={{
+                  backgroundColor: '#3182ce',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '28px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  minWidth: '28px'
+                }}>
+                  {filteredMetrology.length}
+                </div>
+              </div>
               <div className="table-actions">
+                {/* Search input */}
+                <input
+                  type="text"
+                  value={metrologySearchTerm}
+                  onChange={e => setMetrologySearchTerm(e.target.value)}
+                  placeholder="Search..."
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '1em',
+                    minWidth: 180,
+                    marginRight: 8
+                  }}
+                />
                 {hasSelectedItems && (
                   <div style={{ 
                     display: 'flex', 
@@ -6976,6 +7645,22 @@ const Dashboard = () => {
                   <span className="icon">➕</span>
                   Add CVT Date
                 </button>
+                <button 
+                  className="btn-success"
+                  onClick={() => handleExport('metrology')}
+                  title="Export Data"
+                >
+                  <span className="icon">📤</span>
+                  Export
+                </button>
+                <button 
+                  className="btn-info"
+                  onClick={() => handleImport('metrology')}
+                  title="Import Data"
+                >
+                  <span className="icon">📥</span>
+                  Import
+                </button>
               </div>
             </div>
             
@@ -6993,7 +7678,6 @@ const Dashboard = () => {
                     </th>
                     <th>#</th>
                     <th>Certificate Number</th>
-                    <th>Certificate Type</th>
                     <th>Issue Date</th>
                     <th>CVT Type</th>
                     <th>CVT End Date</th>
@@ -7004,7 +7688,7 @@ const Dashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {metrology.map((item, index) => {
+                  {filteredMetrology.map((item, index) => {
                     const createdByUser = users.find(user => user.id === item.created_by || user.username === item.created_by);
                     const daysUntilExpiry = item.cvt_expiry_date ? 
                       Math.ceil((new Date(item.cvt_expiry_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
@@ -7028,22 +7712,37 @@ const Dashboard = () => {
                         </td>
                         <td>{index + 1}</td>
                         <td>
-                          <strong>{item.certificate_number || 'N/A'}</strong>
+                          <strong 
+                            onClick={() => handleMetrologyClick([item])}
+                            style={{
+                              cursor: 'pointer',
+                              color: '#3182ce',
+                              textDecoration: 'underline',
+                              transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.color = '#2c5282';
+                              e.target.style.textDecoration = 'none';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.color = '#3182ce';
+                              e.target.style.textDecoration = 'underline';
+                            }}
+                            title="Click to view all metrology details"
+                          >
+                            {item.certificate_number || 'N/A'}
+                          </strong>
                         </td>
-                        <td>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            🔧 {item.certificate_type || 'N/A'}
-                          </span>
-                        </td>
+
                         <td>{item.issue_date ? new Date(item.issue_date).toLocaleDateString() : 'N/A'}</td>
                         <td>
                           <span style={{ 
                             display: 'flex', 
                             alignItems: 'center', 
                             gap: '4px',
-                            color: item.cvt_type === 'periodic' ? '#007bff' : '#dc3545'
+                            color: item.cvt_type === 'periodic' ? '#3182ce' : '#dc3545'
                           }}>
-                            {item.cvt_type === 'periodic' ? '🔄' : '🔧'} {item.cvt_type || 'N/A'}
+                            {item.cvt_type || 'N/A'}
                           </span>
                         </td>
                         <td>
@@ -7083,23 +7782,18 @@ const Dashboard = () => {
                         <td>{item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A'}</td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <AvatarDisplay 
-                              entityType="users" 
-                              entityId={item.created_by} 
-                              size={24} 
-                              entityName={createdByUser?.first_name && createdByUser?.last_name ? 
-                                `${createdByUser.first_name} ${createdByUser.last_name}` : 
-                                createdByUser?.username || 'Unknown User'}
-                            />
-                            <span>
-                              {createdByUser?.first_name && createdByUser?.last_name ? 
-                                `${createdByUser.first_name} ${createdByUser.last_name}` : 
-                                createdByUser?.username || 'Unknown User'}
+                            <span style={{ 
+                              fontSize: '0.9em', 
+                              color: 'var(--text-primary)',
+                              fontWeight: '500'
+                            }}>
+                              {item.creator_name || 'Unknown User'}
                             </span>
                           </div>
                         </td>
                         <td>
                           <div className="action-buttons">
+                            <CvtAttachmentIndicator cvtId={item.id} onClick={() => handleOpenCvtAttachments(item.id)} />
                             <button 
                               className="btn-edit"
                               onClick={() => handleEditEntity(item, 'metrology')}
@@ -7122,7 +7816,7 @@ const Dashboard = () => {
                 </tbody>
               </table>
               
-              {metrology.length === 0 && (
+              {filteredMetrology.length === 0 && (
                 <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
                   <h3>No CVT Records Found</h3>
                   <p>Use the "Add CVT Date" button to create your first CVT record.</p>
@@ -7135,7 +7829,7 @@ const Dashboard = () => {
               case 'jackpots': {
           return renderTable('Jackpot Records', jackpots, [
             { key: 'slot_count', label: 'NUMBER OF SLOTS', render: (item) => {
-              if (!item.serial_numbers) return (
+              if (!item.serial_number) return (
                 <span style={{ 
                   backgroundColor: 'var(--accent-color)', 
                   color: 'white',
@@ -7147,24 +7841,34 @@ const Dashboard = () => {
                   0 slots
                 </span>
               );
-              const serials = item.serial_numbers.split(/\s|\n/).filter(s => s.trim());
+              
+              // Split serial numbers by space and newline, then filter empty strings
+              const serialNumbers = item.serial_number.split(/\s|\n/).filter(s => s.trim());
+              
+              // Count how many slots match these serial numbers
+              const matchingSlots = slotMachines.filter(slot => 
+                serialNumbers.includes(slot.serial_number)
+              );
+              
+              const slotCount = matchingSlots.length;
+              
               return (
                 <span style={{ 
-                  backgroundColor: 'var(--accent-color)', 
+                  backgroundColor: slotCount > 0 ? 'var(--accent-color)' : '#ff6b6b', 
                   color: 'white',
                   padding: '4px 8px',
                   borderRadius: '12px',
                   fontSize: '0.9em',
                   fontWeight: 'bold'
                 }}>
-                  {serials.length} slots
+                  {slotCount} slot{slotCount !== 1 ? 's' : ''}
                 </span>
               );
             }},
             { key: 'jackpot_name', label: 'Jackpot Name', render: (item) => (
               <span 
                 style={{ 
-                  color: '#007bff', 
+                  color: '#3182ce', 
                   cursor: 'pointer', 
                   textDecoration: 'underline',
                   fontWeight: '500'
@@ -7186,31 +7890,16 @@ const Dashboard = () => {
                 </span>
               );
             }},
-            { key: 'levels', label: 'Levels', render: (item) => {
-              const levels = [item.level_1, item.level_2, item.level_3, item.level_4, item.level_5];
-              const validLevels = levels.filter(level => level !== null && level !== undefined && level !== '');
-              if (validLevels.length === 0) return 'N/A';
-              
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  {validLevels.map((level, index) => (
-                    <div key={index} style={{ 
-                      padding: '2px 6px', 
-                      background: 'var(--glass-bg)', 
-                      borderRadius: '3px',
-                      fontSize: '11px',
-                      fontWeight: '400',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--border-color)'
-                    }}>
-                      Level {index + 1}: {level}
-                    </div>
-                  ))}
-                </div>
-              );
-            }},
-            { key: 'increment_percentage', label: 'Increment Rate', render: (item) => typeof item.increment_percentage === 'number' ? `${item.increment_percentage}%` : 'N/A' },
-            { key: 'details', label: 'Description', render: (item) => item.details || 'N/A' }
+
+            { key: 'increment_rate', label: 'Increment Rate', render: (item) => (
+              <span style={{ 
+                color: 'var(--accent-color)', 
+                fontWeight: 'bold'
+              }}>
+                {item.increment_rate ? `${(item.increment_rate * 100).toFixed(1)}%` : 'N/A'}
+              </span>
+            )},
+            { key: 'description', label: 'Description', render: (item) => item.description || 'N/A' }
           ], { 
             onAdd: () => handleAddEntity('jackpots'),
             onEdit: (item) => handleEditEntity(item, 'jackpots'),
@@ -7605,10 +8294,15 @@ const Dashboard = () => {
   return (
     <div className={`app-layout ${theme}`}>
       {/* Unified Header */}
-      <div className="main-header">
+      <div className="main-header" style={{
+        background: theme === 'light' ? 'linear-gradient(135deg, #3182ce 0%, #2c5282 100%)' : 'inherit',
+        color: theme === 'light' ? 'white' : 'inherit'
+      }}>
         <div className="header-left">
           <div className="header-logo">
-            <h2>CASHPOT</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h2>CASHPOT</h2>
+            </div>
             <span className="header-subtitle">Gaming Management System</span>
           </div>
         </div>
@@ -7714,6 +8408,7 @@ const Dashboard = () => {
           invoices={invoices}
           users={users}
           slotMachines={slotMachines}
+          showCustomNotification={showCustomNotification}
         />
       )}
 
@@ -7741,6 +8436,7 @@ const Dashboard = () => {
           onClose={handleCloseUserForm}
           companies={companies}
           locations={locations}
+          showCustomNotification={showCustomNotification}
         />
       )}
 
@@ -7774,13 +8470,338 @@ const Dashboard = () => {
 
         {/* Slot Attachments Modal */}
         {showSlotAttachmentsModal && selectedSlotId && (
-          <div className="modal-backdrop" onClick={handleCloseSlotAttachments}>
-            <div className="modal-content" style={{ maxWidth: 500, margin: '10vh auto', position: 'relative' }} onClick={e => e.stopPropagation()}>
+          <div className="modal-overlay" onClick={handleCloseSlotAttachments}>
+            <div className="modal-content" onClick={e => e.stopPropagation()}>
               <div className="modal-header">
-                <h2>Atașamente Slot</h2>
-                <button className="modal-close" onClick={handleCloseSlotAttachments}>&times;</button>
+                <h2>Slot Attachments</h2>
+                <button className="modal-close" onClick={handleCloseSlotAttachments}>×</button>
               </div>
-              <FileDisplay entityType="slots" entityId={selectedSlotId} />
+              <div className="modal-body">
+                <FileDisplay entityType="slots" entityId={selectedSlotId} showCustomNotification={showCustomNotification} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Metrology Popup Modal */}
+        {selectedMetrology && (
+          <MetrologyPopup 
+            metrology={selectedMetrology}
+            onClose={handleCloseMetrologyPopup}
+          />
+        )}
+
+        {/* CVT Attachments Modal */}
+        {showCvtAttachments && selectedCvtForAttachments && (
+          <div className="modal-overlay" onClick={handleCloseCvtAttachments}>
+            <div className="modal-content" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>CVT Attachments</h2>
+                <button className="modal-close" onClick={handleCloseCvtAttachments}>×</button>
+              </div>
+              <div className="modal-body">
+                <FileDisplay entityType="metrology" entityId={selectedCvtForAttachments} showCustomNotification={showCustomNotification} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Notification */}
+        {showNotification && (
+          <div style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 10000,
+            fontFamily: 'var(--font-family)'
+          }}>
+            <div style={{
+              backgroundColor: notificationType === 'success' ? '#4caf50' : 
+                             notificationType === 'error' ? '#f44336' :
+                             notificationType === 'warning' ? '#ff9800' : '#2196f3',
+              color: 'white',
+              padding: '16px 20px',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              maxWidth: '400px',
+              wordWrap: 'break-word',
+              animation: 'slideInRight 0.3s ease-out'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <span style={{ fontSize: '18px' }}>
+                  {notificationType === 'success' ? '✅' :
+                   notificationType === 'error' ? '❌' :
+                   notificationType === 'warning' ? '⚠️' : 'ℹ️'}
+                </span>
+                <span style={{ fontSize: '14px', fontWeight: '500' }}>
+                  {notificationMessage}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Individual Delete Confirmation Modal */}
+        {showDeleteConfirm && fileToDelete && (
+          <div 
+            onClick={() => {
+              console.log('🔥 Individual delete overlay clicked, closing modal');
+              cancelDeleteEntity();
+            }}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 99999
+            }}
+          >
+            <div 
+              onClick={(e) => {
+                console.log('🔥 Individual delete modal content clicked, preventing close');
+                e.stopPropagation();
+              }}
+              style={{
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: '12px',
+                padding: '24px',
+                maxWidth: '450px',
+                width: '90%',
+                boxShadow: 'var(--glass-shadow)',
+                border: '1px solid var(--border-color)',
+                position: 'relative',
+                backdropFilter: 'var(--glass-blur)'
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                marginBottom: '20px'
+              }}>
+                <span style={{ fontSize: '24px' }}>⚠️</span>
+                <h3 style={{
+                  margin: 0,
+                  color: 'var(--text-primary)',
+                  fontSize: '20px',
+                  fontWeight: '600',
+                  fontFamily: 'var(--font-family)'
+                }}>
+                  Delete Confirmation
+                </h3>
+              </div>
+              
+              <p style={{
+                margin: '0 0 24px 0',
+                color: 'var(--text-secondary)',
+                fontSize: '15px',
+                lineHeight: '1.6',
+                fontFamily: 'var(--font-family)'
+              }}>
+                Are you sure you want to delete this <strong style={{color: 'var(--text-primary)'}}>{getEntityDisplayName(fileToDelete.type)}</strong>?
+                <br />
+                <span style={{color: '#ff4757', fontSize: '13px'}}>This action cannot be undone.</span>
+              </p>
+              
+              <div style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  onClick={() => {
+                    console.log('🔥 Individual delete cancel button clicked');
+                    cancelDeleteEntity();
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    backgroundColor: 'transparent',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    fontFamily: 'var(--font-family)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    console.log('🔥 Individual delete confirm button clicked');
+                    confirmDeleteEntity();
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: 'var(--gradient-danger)',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    fontFamily: 'var(--font-family)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.opacity = '0.9';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.opacity = '1';
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Bulk Delete Confirmation Modal */}
+        {showBulkDeleteConfirm && (
+          console.log('🔥 RENDERING BULK DELETE MODAL:', { showBulkDeleteConfirm, bulkDeleteType, selectedItems }) || null
+        ) && (
+                      <div 
+              onClick={() => {
+                console.log('🔥 Overlay clicked, closing modal');
+                cancelBulkDelete();
+              }}
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 99999
+              }}
+            >
+            <div 
+              onClick={(e) => {
+                console.log('🔥 Modal content clicked, preventing close');
+                e.stopPropagation();
+              }}
+              style={{
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: '12px',
+                padding: '24px',
+                maxWidth: '450px',
+                width: '90%',
+                boxShadow: 'var(--glass-shadow)',
+                border: '1px solid var(--border-color)',
+                position: 'relative',
+                backdropFilter: 'var(--glass-blur)'
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                marginBottom: '20px'
+              }}>
+                <span style={{ fontSize: '24px' }}>⚠️</span>
+                <h3 style={{
+                  margin: 0,
+                  color: 'var(--text-primary)',
+                  fontSize: '20px',
+                  fontWeight: '600',
+                  fontFamily: 'var(--font-family)'
+                }}>
+                  Bulk Delete Confirmation
+                </h3>
+              </div>
+              
+              <p style={{
+                margin: '0 0 24px 0',
+                color: 'var(--text-secondary)',
+                fontSize: '15px',
+                lineHeight: '1.6',
+                fontFamily: 'var(--font-family)'
+              }}>
+                Are you sure you want to delete <strong style={{color: 'var(--text-primary)'}}>{selectedItems.length} {getEntityDisplayName(bulkDeleteType)}</strong>?
+                <br />
+                <span style={{color: '#ff4757', fontSize: '13px'}}>This action cannot be undone.</span>
+              </p>
+              
+              <div style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  onClick={() => {
+                    console.log('🔥 Cancel button clicked');
+                    cancelBulkDelete();
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    backgroundColor: 'transparent',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    fontFamily: 'var(--font-family)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.backgroundColor = 'var(--bg-tertiary)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    console.log('🔥 Delete All button clicked');
+                    confirmBulkDelete();
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    background: 'var(--gradient-danger)',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    fontFamily: 'var(--font-family)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.opacity = '0.9';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.opacity = '1';
+                  }}
+                >
+                  Delete All
+                </button>
+              </div>
             </div>
           </div>
         )}
