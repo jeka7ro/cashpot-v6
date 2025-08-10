@@ -102,7 +102,16 @@ const Calendar = ({ value, onChange, placeholder = "Select date", allowManualInp
 
   return (
     <div className="calendar-container">
-      <div className="calendar-input" onClick={() => setShowCalendar(!showCalendar)}>
+      <div
+        className="calendar-input"
+        onClick={(e) => {
+          // Toggle only when clicking the icon area; let input focus without toggling
+          const target = e.target;
+          if (target && target.classList && target.classList.contains('calendar-icon')) {
+            setShowCalendar((s) => !s);
+          }
+        }}
+      >
         {allowManualInput ? (
           <input
             type="text"
@@ -124,11 +133,13 @@ const Calendar = ({ value, onChange, placeholder = "Select date", allowManualInp
               border: 'none',
               color: 'var(--text-primary)'
             }}
+            inputMode="numeric"
+            pattern="\\d{2}\\.\\d{2}\\.\\d{4}"
           />
         ) : (
           <span className="calendar-value">{formatDisplayDate(value)}</span>
         )}
-        <span className="calendar-icon">📅</span>
+        <span className="calendar-icon" onClick={() => setShowCalendar((s) => !s)}>📅</span>
       </div>
       
       {showCalendar && (
@@ -5164,6 +5175,16 @@ const Dashboard = () => {
     const savedTheme = localStorage.getItem('theme');
     return savedTheme || 'light';
   });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebarCollapsed') === '1'; } catch { return false; }
+  });
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('sidebarCollapsed', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
 
   // Click-to-filter states for slot machines table
   const [selectedLocationFilter, setSelectedLocationFilter] = useState(null);
@@ -5215,6 +5236,40 @@ const Dashboard = () => {
   const [showCvtAttachments, setShowCvtAttachments] = useState(false);
   const [selectedCvtForAttachments, setSelectedCvtForAttachments] = useState(null);
 
+  // Marketing module state
+  const [marketingCampaigns, setMarketingCampaigns] = useState([]);
+  const [showMarketingForm, setShowMarketingForm] = useState(false);
+  const emptyMarketingForm = {
+    type: 'promotion',
+    name: '',
+    description: '',
+    locations: [],
+    start_at: '',
+    end_at: '',
+    payouts: [] // {date:'', location_id:'', amount:''}
+  };
+  const [marketingForm, setMarketingForm] = useState(emptyMarketingForm);
+  const [savingMarketing, setSavingMarketing] = useState(false);
+
+  const fetchMarketingCampaigns = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${localStorage.getItem('token')}` };
+      const res = await fetch(`${API}/marketing/campaigns`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setMarketingCampaigns(data);
+      }
+    } catch (e) {
+      console.error('Failed to load marketing campaigns', e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeView === 'marketing') {
+      fetchMarketingCampaigns();
+    }
+  }, [activeView]);
+
   // Bulk delete confirmation modal state
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkDeleteType, setBulkDeleteType] = useState('');
@@ -5239,6 +5294,7 @@ const Dashboard = () => {
   const [showLocationDetailsPage, setShowLocationDetailsPage] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [showHistoryChangesPage, setShowHistoryChangesPage] = useState(false);
+  const handleCloseHistoryChanges = useCallback(() => setShowHistoryChangesPage(false), []);
 
   // Notification system state
   const [showNotification, setShowNotification] = useState(false);
@@ -5429,6 +5485,10 @@ const Dashboard = () => {
 
   // Timer tick effect for scheduled changes
   useEffect(() => {
+    if (showHistoryChangesPage) {
+      // Pause schedule executor while All History Changes is open to avoid flicker
+      return;
+    }
     const timerTick = () => {
       const now = Date.now();
       const expiredChanges = scheduledChanges.filter(change => 
@@ -5563,13 +5623,17 @@ const Dashboard = () => {
 
     const interval = setInterval(timerTick, 1000);
     return () => clearInterval(interval);
-  }, [scheduledChanges]);
+  }, [scheduledChanges, showHistoryChangesPage]);
 
   // Timer tick for countdown display updates
   useEffect(() => {
+    if (showHistoryChangesPage) {
+      // Pause the visual countdown ticker to stop re-renders while page is open
+      return;
+    }
     const interval = setInterval(() => setTimerTick(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [showHistoryChangesPage]);
 
   // Initialize timer state and clean up expired changes on mount
   useEffect(() => {
@@ -5739,10 +5803,11 @@ const Dashboard = () => {
     ...(user?.permissions?.modules?.providers ? [{ id: 'providers', label: 'Providers', icon: '🎮', count: providers.length }] : []),
     ...(user?.permissions?.modules?.cabinets ? [{ id: 'cabinets', label: 'Cabinets', icon: '🎰', count: cabinets.length }] : []),
     ...(user?.permissions?.modules?.game_mixes ? [{ id: 'gamemixes', label: 'Game Mixes', icon: '🎲', count: gameMixes.length }] : []),
-    ...(user?.permissions?.modules?.slot_machines ? [{ id: 'slots', label: 'Slots', icon: '🎯', count: slotMachines.filter(s => s.status !== 'inactive').length }] : []),
+    ...(user?.permissions?.modules?.slot_machines ? [{ id: 'slots', label: 'Slots', icon: '🍒', count: slotMachines.filter(s => s.status !== 'inactive').length }] : []),
     ...(user?.permissions?.modules?.slot_machines ? [{ id: 'warehouse', label: 'Warehouse', icon: '📦', count: slotMachines.filter(s => s.status === 'inactive').length }] : []),
     ...(user?.permissions?.modules?.metrology ? [{ id: 'metrology2', label: 'Metrology CVT', icon: '🔬', count: metrology.length }] : []),
     ...(user?.permissions?.modules?.jackpots ? [{ id: 'jackpots', label: 'Jackpots', icon: '🎰', count: jackpots.length }] : []),
+    { id: 'marketing', label: 'Marketing', icon: '📣', count: marketingCampaigns.length },
     ...(user?.permissions?.modules?.invoices ? [{ id: 'invoices', label: 'Invoices', icon: '💰', count: invoices.length }] : []),
     ...(user?.permissions?.modules?.onjn_reports ? [{ id: 'onjn', label: 'ONJN Reports', icon: '📋', count: onjnReports.length + comisionDates.length }] : []),
     ...(user?.permissions?.modules?.legal_documents ? [{ id: 'legal', label: 'Legal Documents', icon: '📄', count: legalDocuments.length }] : []),
@@ -6888,34 +6953,7 @@ const Dashboard = () => {
             </button>
           </div>
 
-          {/* All History Changes button - positioned below Import */}
-          <div style={{ 
-            marginTop: '15px',
-            padding: '0 10px'
-          }}>
-            <button 
-              className="btn-secondary"
-              onClick={() => setShowHistoryChangesPage(true)}
-              title="All History Changes"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                background: 'var(--background-secondary)',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '500',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <span className="icon">📊</span>
-              All History Changes
-            </button>
-          </div>
+
 
             {/* Change History button for Providers */}
             {entityType === 'providers' && (
@@ -7068,65 +7106,9 @@ const Dashboard = () => {
                 })()}
               </div>
 
-              {/* Iconița Istoric - Afișează istoricul modificărilor */}
-              <div style={{ position: 'relative' }}>
-                <button
-                  style={{
-                    width: '30px',
-                    height: '30px',
-                    borderRadius: '50%',
-                    border: 'none',
-                    background: 'var(--bg-secondary)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '14px',
-                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
-                    transition: 'all 0.2s ease'
-                  }}
-                  onClick={() => {
-                    // Deschide modal cu istoric modificări pentru slot-uri din backend
-                    handleOpenGlobalChangeHistory('slots');
-                  }}
-                  title="Change history"
-                >
-                  📋
-                </button>
-                {/* Badge cu numărul de modificări din istoric */}
-                {(() => {
-                  // Folosește changeHistoryData pentru badge dacă este disponibil
-                  const slotHistoryCount = changeHistoryData && selectedHistoryEntityType === 'slots' 
-                    ? changeHistoryData.length 
-                    : 0;
-                  
-                  if (slotHistoryCount > 0) {
-                    return (
-                      <div style={{
-                        position: 'absolute',
-                        top: '-3px',
-                        right: '-3px',
-                        backgroundColor: '#3182ce',
-                        color: 'white',
-                        borderRadius: '50%',
-                        width: '16px',
-                        height: '16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '10px',
-                        fontWeight: 'bold',
-                        zIndex: 1002
-                      }}>
-                        {slotHistoryCount}
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
 
-              {/* Iconița All Modifications History - Afișează toate modificările (programate și manuale) */}
+
+              {/* All History Changes icon - same format as timer icon */}
               <div style={{ position: 'relative' }}>
                 <button
                   style={{
@@ -7143,44 +7125,11 @@ const Dashboard = () => {
                     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
                     transition: 'all 0.2s ease'
                   }}
-                  onClick={() => {
-                    // Deschide modal cu toate modificările pentru slot-uri
-                    handleOpenAllModificationsHistory('slots');
-                  }}
-                  title="All modifications history"
+                  onClick={() => setShowHistoryChangesPage(true)}
+                  title="All History Changes"
                 >
                   📊
                 </button>
-                {/* Badge cu numărul total de modificări */}
-                {(() => {
-                  const allModificationsCount = allModificationsData && selectedAllModificationsEntityType === 'slots' 
-                    ? allModificationsData.length 
-                    : 0;
-                  
-                  if (allModificationsCount > 0) {
-                    return (
-                      <div style={{
-                        position: 'absolute',
-                        top: '-3px',
-                        right: '-3px',
-                        backgroundColor: '#059669',
-                        color: 'white',
-                        borderRadius: '50%',
-                        width: '16px',
-                        height: '16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '10px',
-                        fontWeight: 'bold',
-                        zIndex: 1002
-                      }}>
-                        {allModificationsCount}
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
               </div>
             </div>
           </div>
@@ -11420,6 +11369,9 @@ const Dashboard = () => {
   const HistoryChangesPage = React.memo(({ onClose }) => {
     const [historyData, setHistoryData] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [authError, setAuthError] = useState(false);
+    const hasFetchedRef = React.useRef(false);
+    const cacheRef = React.useRef(null);
     const [filters, setFilters] = useState({
       dateFrom: '',
       dateTo: '',
@@ -11427,9 +11379,94 @@ const Dashboard = () => {
       provider: '',
       gameMix: ''
     });
+    const [multiFilters, setMultiFilters] = useState({ locations: [], providers: [], gameMixes: [] });
+    const [openDropdown, setOpenDropdown] = useState(null);
+    const [globalQuery, setGlobalQuery] = useState('');
+    const [dropdownQuery, setDropdownQuery] = useState({ locations: '', providers: '', gameMixes: '' });
+    // Date range filter (with presets)
+    const [dateRange, setDateRange] = useState(() => {
+      const now = new Date();
+      const startMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const endMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return { from: startMonth, to: endMonth, preset: 'this_month' };
+    });
+
+    const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+    const endOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+    const startOfWeekMonday = (d) => {
+      const day = d.getDay(); // 0=Sun ... 6=Sat
+      const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
+      const res = new Date(d);
+      res.setDate(d.getDate() + diff);
+      return startOfDay(res);
+    };
+    const endOfWeekSunday = (d) => {
+      const start = startOfWeekMonday(d);
+      const res = new Date(start);
+      res.setDate(start.getDate() + 6);
+      return endOfDay(res);
+    };
+
+    const applyPreset = (preset) => {
+      const now = new Date();
+      let from = null; let to = null;
+      if (preset === 'today') {
+        from = startOfDay(now); to = endOfDay(now);
+      } else if (preset === 'this_week') {
+        from = startOfWeekMonday(now); to = endOfWeekSunday(now);
+      } else if (preset === 'this_month') {
+        from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      } else if (preset === 'last_month') {
+        const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        from = new Date(last.getFullYear(), last.getMonth(), 1, 0, 0, 0, 0);
+        to = new Date(last.getFullYear(), last.getMonth() + 1, 0, 23, 59, 59, 999);
+      } else if (preset === 'this_year') {
+        from = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+        to = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      } else if (preset === 'prev_year') {
+        const y = now.getFullYear() - 1;
+        from = new Date(y, 0, 1, 0, 0, 0, 0);
+        to = new Date(y, 11, 31, 23, 59, 59, 999);
+      } else if (preset === 'all_time') {
+        from = null; to = null;
+      }
+      setDateRange({ from, to, preset });
+    };
+
+    const formatDateTimeDDMMYYYYHHMM = (value) => {
+      if (!value) return '';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+      return `${dd}.${mm}.${yyyy} ${hh}:${mi}`;
+    };
+
+    // Helpers to parse Calendar (yyyy-mm-dd) to Date at day bounds
+    const parseYMDToStart = (val) => {
+      if (!val) return null;
+      const [y, m, d] = String(val).split('-').map(Number);
+      if (!y || !m || !d) return null;
+      return new Date(y, m - 1, d, 0, 0, 0, 0);
+    };
+    const parseYMDToEnd = (val) => {
+      if (!val) return null;
+      const [y, m, d] = String(val).split('-').map(Number);
+      if (!y || !m || !d) return null;
+      return new Date(y, m - 1, d, 23, 59, 59, 999);
+    };
 
     // Fetch history data
     const fetchHistoryData = async () => {
+      if (hasFetchedRef.current && cacheRef.current) {
+        setHistoryData(cacheRef.current);
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         const response = await fetch(`${API}/change-history/slots/all`, {
@@ -11440,10 +11477,52 @@ const Dashboard = () => {
         
         if (response.ok) {
           const data = await response.json();
-          setHistoryData(data);
+          // Fallback: if backend 'all' endpoint returns empty, aggregate per-entity
+          if (Array.isArray(data) && data.length === 0) {
+            try {
+              const token = localStorage.getItem('token');
+              const slotsRes = await fetch(`${API}/slot-machines`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (slotsRes.ok) {
+                const slots = await slotsRes.json();
+                const slotIds = (Array.isArray(slots) ? slots : []).map(s => s.id).filter(Boolean).slice(0, 150);
+                const results = await Promise.all(
+                  slotIds.map(id => (
+                    fetch(`${API}/change-history/slots/${id}`, {
+                      headers: { 'Authorization': `Bearer ${token}` }
+                    })
+                      .then(r => r.ok ? r.json() : [])
+                      .catch(() => [])
+                  ))
+                );
+                const merged = results.flat().sort((a, b) => new Date(b.created_at || b.scheduled_datetime || 0) - new Date(a.created_at || a.scheduled_datetime || 0)).slice(0, 500);
+                cacheRef.current = merged;
+                hasFetchedRef.current = true;
+                setHistoryData(merged);
+              } else {
+                cacheRef.current = [];
+                hasFetchedRef.current = true;
+                setHistoryData([]);
+              }
+            } catch (e) {
+              cacheRef.current = [];
+              hasFetchedRef.current = true;
+              setHistoryData([]);
+            }
+          } else {
+            cacheRef.current = data;
+            hasFetchedRef.current = true;
+            setHistoryData(data);
+          }
         } else {
-          console.error('Failed to fetch history data');
-          showCustomNotification('Failed to fetch history data', 'error');
+          if (response.status === 401 || response.status === 403) {
+            setAuthError(true);
+            showCustomNotification('Not authenticated. Please login again.', 'error');
+          } else {
+            console.error('Failed to fetch history data');
+            showCustomNotification('Failed to fetch history data', 'error');
+          }
         }
       } catch (error) {
         console.error('Error fetching history data:', error);
@@ -11457,6 +11536,20 @@ const Dashboard = () => {
     useEffect(() => {
       fetchHistoryData();
     }, []); // ok to run once; fetchHistoryData uses stable API/constants
+
+    // Enrichment helper (must be defined BEFORE using in memos)
+    const getContextForItem = (item) => {
+      const slot = (Array.isArray(slotMachines) ? slotMachines : []).find(s => s.id === item.entity_id);
+      const serial = slot?.serial_number || item.serial_number || 'N/A';
+      const locationName = (Array.isArray(locations) ? locations : []).find(l => l.id === slot?.location_id)?.name
+        || item.location_name || 'N/A';
+      const providerName = (Array.isArray(providers) ? providers : []).find(p => p.id === slot?.provider_id)?.name
+        || item.provider_name || 'N/A';
+      const gameMixName = (Array.isArray(gameMixes) ? gameMixes : []).find(g => g.id === slot?.game_mix_id)?.name
+        || item.game_mix_name || 'N/A';
+      const modifiedBy = item.modified_by || item.user_name || 'N/A';
+      return { serial, locationName, providerName, gameMixName, modifiedBy };
+    };
 
     // Keep inputs controlled locally without format flips on each change
     const setDateFrom = useCallback((val) => {
@@ -11484,16 +11577,58 @@ const Dashboard = () => {
       return date;
     };
 
-    // Filter history data
+    // Options for multi-select dropdowns
+    const locationOptions = React.useMemo(() => {
+      const set = new Set();
+      (historyData || []).forEach(it => set.add(getContextForItem(it).locationName));
+      set.delete('N/A');
+      return Array.from(set).sort();
+    }, [historyData]);
+    const providerOptions = React.useMemo(() => {
+      const set = new Set();
+      (historyData || []).forEach(it => set.add(getContextForItem(it).providerName));
+      set.delete('N/A');
+      return Array.from(set).sort();
+    }, [historyData]);
+    const gameMixOptions = React.useMemo(() => {
+      const set = new Set();
+      (historyData || []).forEach(it => set.add(getContextForItem(it).gameMixName));
+      set.delete('N/A');
+      return Array.from(set).sort();
+    }, [historyData]);
+
+    // Filter history data (multiselect OR within group, AND across groups)
     const filteredData = historyData.filter(item => {
-      const createdAt = new Date(item.created_at);
-      const fromDate = parseDateDDMMYYYY(formatDisplayDate(filters.dateFrom) || filters.dateFrom, false);
-      if (fromDate && createdAt < fromDate) return false;
-      const toDate = parseDateDDMMYYYY(formatDisplayDate(filters.dateTo) || filters.dateTo, true);
-      if (toDate && createdAt > toDate) return false;
-      if (filters.location && !item.location_name?.toLowerCase().includes(filters.location.toLowerCase())) return false;
-      if (filters.provider && !item.provider_name?.toLowerCase().includes(filters.provider.toLowerCase())) return false;
-      if (filters.gameMix && !item.game_mix_name?.toLowerCase().includes(filters.gameMix.toLowerCase())) return false;
+      const ctx = getContextForItem(item);
+      if (multiFilters.locations.length && !multiFilters.locations.includes(ctx.locationName)) return false;
+      if (multiFilters.providers.length && !multiFilters.providers.includes(ctx.providerName)) return false;
+      if (multiFilters.gameMixes.length && !multiFilters.gameMixes.includes(ctx.gameMixName)) return false;
+      if (dateRange && (dateRange.from || dateRange.to)) {
+        const when = new Date(item.created_at || item.applied_datetime || item.scheduled_datetime || 0);
+        if (dateRange.from && when < dateRange.from) return false;
+        if (dateRange.to && when > dateRange.to) return false;
+      }
+      if (globalQuery) {
+        const q = globalQuery.toLowerCase();
+        const hay = [
+          ctx.serial,
+          ctx.locationName,
+          ctx.providerName,
+          ctx.gameMixName,
+          item.field_name,
+          item.old_value,
+          item.new_value,
+          item.modified_by || item.user_name,
+          item.modification_type || item.change_type,
+          item.created_at,
+          item.scheduled_datetime,
+          item.applied_datetime
+        ]
+          .filter(Boolean)
+          .join(' | ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
 
@@ -11504,18 +11639,22 @@ const Dashboard = () => {
       e.target.showPicker?.();
     };
 
+    // (moved earlier to avoid temporal dead-zone)
+
     // Export to XLS
     const handleExportToXLS = () => {
       const data = filteredData.map((item, index) => ({
         'ID': index + 1,
-        'Serial Number': item.serial_number || 'N/A',
-        'Location': item.location_name || 'N/A',
-        'Provider': item.provider_name || 'N/A',
-        'Game Mix': item.game_mix_name || 'N/A',
+        ...(() => { const c = getContextForItem(item); return {
+          'Serial Number': c.serial,
+          'Location': c.locationName,
+          'Provider': c.providerName,
+          'Game Mix': c.gameMixName,
+        }; })(),
         'Field Modified': item.field_name || 'N/A',
         'Old Value': item.old_value || 'N/A',
         'New Value': item.new_value || 'N/A',
-        'Modified By': item.modified_by || 'N/A',
+        'Modified By': getContextForItem(item).modifiedBy,
         'Modified At': item.created_at ? formatDateDDMMYYYY(item.created_at) : 'N/A',
         'Modification Type': item.modification_type || 'Manual'
       }));
@@ -11604,115 +11743,125 @@ const Dashboard = () => {
                   }}>
                     🔍 Filters
                   </h3>
-                  <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-                    gap: '16px' 
-                  }}>
-                    <div>
-                      <label style={{ 
-                        display: 'block', 
-                        marginBottom: '8px', 
-                        color: 'var(--text-primary)',
-                        fontWeight: '500'
-                      }}>
-                        Date From
-                      </label>
-                      <Calendar
-                        value={filters.dateFrom}
-                        onChange={(val) => setDateFrom(val)}
-                        placeholder="dd.mm.yyyy"
-                        allowManualInput
-                      />
-                    </div>
-                    <div>
-                      <label style={{ 
-                        display: 'block', 
-                        marginBottom: '8px', 
-                        color: 'var(--text-primary)',
-                        fontWeight: '500'
-                      }}>
-                        Date To
-                      </label>
-                      <Calendar
-                        value={filters.dateTo}
-                        onChange={(val) => setDateTo(val)}
-                        placeholder="dd.mm.yyyy"
-                        allowManualInput
-                      />
-                    </div>
-                    <div>
-                      <label style={{ 
-                        display: 'block', 
-                        marginBottom: '8px', 
-                        color: 'var(--text-primary)',
-                        fontWeight: '500'
-                      }}>
-                        Location
-                      </label>
+                  <div style={{ display:'flex', gap: '12px', flexWrap: 'wrap' }}>
+                    {/* Global search */}
+                    <div style={{ flex:'1 1 240px' }}>
                       <input
                         type="text"
-                        placeholder="Filter by location..."
-                        value={filters.location}
-                        onChange={(e) => setFilters(prev => ({ ...prev, location: e.target.value }))}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
-                          background: 'var(--bg-primary)',
-                          color: 'var(--text-primary)'
-                        }}
+                        placeholder="Search in any column..."
+                        value={globalQuery}
+                        onChange={(e) => setGlobalQuery(e.target.value)}
+                        style={{ width:'100%', padding:'8px 12px', border:'1px solid var(--border-color)', borderRadius:6, background:'var(--bg-primary)', color:'var(--text-primary)' }}
                       />
                     </div>
-                    <div>
-                      <label style={{ 
-                        display: 'block', 
-                        marginBottom: '8px', 
-                        color: 'var(--text-primary)',
-                        fontWeight: '500'
-                      }}>
-                        Provider
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Filter by provider..."
-                        value={filters.provider}
-                        onChange={(e) => setFilters(prev => ({ ...prev, provider: e.target.value }))}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
-                          background: 'var(--bg-primary)',
-                          color: 'var(--text-primary)'
-                        }}
-                      />
+                    {/* Date presets */}
+                    <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+                      {[
+                        {k:'today', t:'Today'},
+                        {k:'this_week', t:'This week'},
+                        {k:'this_month', t:'This month'},
+                        {k:'last_month', t:'Last month'},
+                        {k:'this_year', t:'This year'},
+                        {k:'prev_year', t:'Previous year'},
+                        {k:'all_time', t:'All time'}
+                      ].map(p => (
+                        <button key={p.k} onClick={() => applyPreset(p.k)} style={{
+                          background: dateRange.preset===p.k? 'var(--gradient-primary)':'transparent',
+                          color: dateRange.preset===p.k? '#fff':'var(--text-primary)',
+                          border: '1px solid var(--border-color)', borderRadius:6, padding:'6px 10px', height:32, fontSize:12, cursor:'pointer'
+                        }}>{p.t}</button>
+                      ))}
+                      <div style={{ display:'flex', gap:6, alignItems:'center', marginLeft:8 }}>
+                        <input
+                          type="date"
+                          value={dateRange.from ? `${dateRange.from.getFullYear()}-${String(dateRange.from.getMonth()+1).padStart(2,'0')}-${String(dateRange.from.getDate()).padStart(2,'0')}` : ''}
+                          onChange={(e) => setDateRange(prev => ({ ...prev, from: parseYMDToStart(e.target.value), preset: 'custom' }))}
+                          style={{ height:32, padding:'6px 8px', border:'1px solid var(--border-color)', borderRadius:6, background:'var(--bg-primary)', color:'var(--text-primary)' }}
+                        />
+                        <span style={{ color:'var(--text-secondary)', fontSize:12 }}>to</span>
+                        <input
+                          type="date"
+                          value={dateRange.to ? `${dateRange.to.getFullYear()}-${String(dateRange.to.getMonth()+1).padStart(2,'0')}-${String(dateRange.to.getDate()).padStart(2,'0')}` : ''}
+                          onChange={(e) => setDateRange(prev => ({ ...prev, to: parseYMDToEnd(e.target.value), preset: 'custom' }))}
+                          style={{ height:32, padding:'6px 8px', border:'1px solid var(--border-color)', borderRadius:6, background:'var(--bg-primary)', color:'var(--text-primary)' }}
+                        />
+                        <button onClick={() => applyPreset('all_time')} style={{
+                          background: 'transparent', color:'var(--text-primary)', border:'1px solid var(--border-color)', borderRadius:6, padding:'6px 10px', height:32, fontSize:12, cursor:'pointer'
+                        }}>Clear</button>
+                      </div>
                     </div>
-                    <div>
-                      <label style={{ 
-                        display: 'block', 
-                        marginBottom: '8px', 
-                        color: 'var(--text-primary)',
-                        fontWeight: '500'
-                      }}>
-                        Game Mix
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Filter by game mix..."
-                        value={filters.gameMix}
-                        onChange={(e) => setFilters(prev => ({ ...prev, gameMix: e.target.value }))}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
-                          background: 'var(--bg-primary)',
-                          color: 'var(--text-primary)'
-                        }}
-                      />
-                    </div>
+                    {[
+                      { key:'locations', label:'Location', options: locationOptions },
+                      { key:'providers', label:'Provider', options: providerOptions },
+                      { key:'gameMixes', label:'Game Mix', options: gameMixOptions }
+                    ].map(group => (
+                      <div key={group.key} style={{ position:'relative' }}>
+                        <button
+                          onClick={() => setOpenDropdown(openDropdown === group.key ? null : group.key)}
+                          aria-expanded={openDropdown === group.key}
+                          className="btn-secondary"
+                          style={{ minWidth: 180, display:'flex', justifyContent:'space-between', alignItems:'center' }}
+                        >
+                          <span>{group.label}</span>
+                          <span style={{ opacity: 0.7 }}>{multiFilters[group.key].length || 0}</span>
+                        </button>
+                        {openDropdown === group.key && (
+                          <div style={{ position:'absolute', zIndex:10, top:'calc(100% + 6px)', left:0, width:260, background:'var(--bg-primary)', border:'1px solid var(--border-color)', borderRadius:8, padding:10, boxShadow:'0 8px 24px rgba(0,0,0,0.3)' }}>
+                            <input
+                              type="text"
+                              placeholder={`Search ${group.label.toLowerCase()}...`}
+                              value={dropdownQuery[group.key] || ''}
+                              onChange={(e) => setDropdownQuery(prev => ({ ...prev, [group.key]: e.target.value }))}
+                              style={{ width:'100%', padding:'6px 10px', border:'1px solid var(--border-color)', borderRadius:6, background:'var(--bg-primary)', color:'var(--text-primary)' }}
+                            />
+                            <div style={{ maxHeight:220, overflowY:'auto', marginTop:6 }}>
+                              {(group.options.filter(o => (dropdownQuery[group.key] ? o.toLowerCase().includes((dropdownQuery[group.key]||'').toLowerCase()) : true))).map(opt => {
+                                const checked = multiFilters[group.key].includes(opt);
+                                return (
+                                  <label key={opt} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 4px', cursor:'pointer' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        setMultiFilters(prev => {
+                                          const next = new Set(prev[group.key]);
+                                          if (e.target.checked) next.add(opt); else next.delete(opt);
+                                          return { ...prev, [group.key]: Array.from(next) };
+                                        });
+                                      }}
+                                    />
+                                    <span>{opt}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display:'flex', justifyContent:'flex-end', gap:6, marginTop:8 }}>
+                              <button
+                                onClick={() => setMultiFilters(prev => ({ ...prev, [group.key]: group.options.slice(0, 2000) }))}
+                                style={{
+                                  background:'transparent', border:'1px solid var(--border-color)', color:'var(--text-primary)',
+                                  padding:'6px 10px', height:32, borderRadius:6, fontSize:12, cursor:'pointer'
+                                }}
+                              >Select all</button>
+                              <button
+                                onClick={() => setMultiFilters(prev => ({ ...prev, [group.key]: [] }))}
+                                style={{
+                                  background:'transparent', border:'1px solid var(--border-color)', color:'var(--text-primary)',
+                                  padding:'6px 10px', height:32, borderRadius:6, fontSize:12, cursor:'pointer'
+                                }}
+                              >Clear</button>
+                              <button
+                                onClick={() => setOpenDropdown(null)}
+                                style={{
+                                  background:'transparent', border:'1px solid var(--border-color)', color:'var(--text-primary)',
+                                  padding:'6px 10px', height:32, borderRadius:6, fontSize:12, cursor:'pointer'
+                                }}
+                              >Apply</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -11739,7 +11888,31 @@ const Dashboard = () => {
                     </h3>
                   </div>
 
-                  {loading ? (
+                  {authError ? (
+                    <div style={{
+                      textAlign: 'center',
+                      padding: '40px',
+                      color: 'var(--text-secondary)',
+                      fontSize: '16px'
+                    }}>
+                      Not authenticated. Please login.
+                      <div style={{ marginTop: '12px' }}>
+                        <button
+                          onClick={() => { localStorage.removeItem('token'); window.location.reload(); }}
+                          style={{
+                            background: 'var(--gradient-primary)',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '8px 12px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Re-login
+                        </button>
+                      </div>
+                    </div>
+                  ) : loading ? (
                     <div style={{
                       textAlign: 'center',
                       padding: '40px',
@@ -11770,7 +11943,7 @@ const Dashboard = () => {
                           }}>
                             ID
                           </th>
-                          <th style={{
+                           <th style={{
                             padding: '12px 8px',
                             textAlign: 'left',
                             fontWeight: 'bold',
@@ -11891,28 +12064,28 @@ const Dashboard = () => {
                                 color: 'var(--text-secondary)',
                                 fontWeight: 'bold'
                               }}>
-                                {item.serial_number || 'N/A'}
+                                {getContextForItem(item).serial}
                               </td>
                               <td style={{
                                 padding: '12px 8px',
                                 fontSize: '13px',
                                 color: 'var(--text-secondary)'
                               }}>
-                                {item.location_name || 'N/A'}
+                                {getContextForItem(item).locationName}
                               </td>
                               <td style={{
                                 padding: '12px 8px',
                                 fontSize: '13px',
                                 color: 'var(--text-secondary)'
                               }}>
-                                {item.provider_name || 'N/A'}
+                                {getContextForItem(item).providerName}
                               </td>
                               <td style={{
                                 padding: '12px 8px',
                                 fontSize: '13px',
                                 color: 'var(--text-secondary)'
                               }}>
-                                {item.game_mix_name || 'N/A'}
+                                {getContextForItem(item).gameMixName}
                               </td>
                               <td style={{
                                 padding: '12px 8px',
@@ -11940,35 +12113,45 @@ const Dashboard = () => {
                               }}>
                                 {item.new_value || 'N/A'}
                               </td>
-                              <td style={{
+                      <td style={{
                                 padding: '12px 8px',
                                 fontSize: '13px',
                                 color: 'var(--text-secondary)'
                               }}>
-                                {item.modified_by || 'N/A'}
+                        {(() => {
+                          const type = (item.modification_type || item.change_type || '').toLowerCase();
+                          const isTimer = type === 'scheduled' || !!item.applied_datetime || !!item.scheduled_datetime;
+                          const name = item.modified_by || item.user_name || (isTimer ? 'Timer' : 'N/A');
+                          return name;
+                        })()}
                               </td>
-                              <td style={{
+                      <td style={{
                                 padding: '12px 8px',
                                 fontSize: '13px',
                                 color: 'var(--text-secondary)'
                               }}>
-                                {item.created_at ? formatDateDDMMYYYY(item.created_at) : 'N/A'}
+                        {(() => {
+                          const when = item.applied_datetime || item.created_at || item.scheduled_datetime;
+                          return when ? formatDateTimeDDMMYYYYHHMM(when) : 'N/A';
+                        })()}
                               </td>
-                              <td style={{
+                      <td style={{
                                 padding: '12px 8px',
                                 fontSize: '13px',
                                 color: 'var(--text-secondary)'
                               }}>
-                                <span style={{
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  fontSize: '11px',
-                                  fontWeight: 'bold',
-                                  backgroundColor: item.modification_type === 'Timer' ? '#ffd700' : '#4caf50',
-                                  color: item.modification_type === 'Timer' ? '#000' : '#fff'
-                                }}>
-                                  {item.modification_type || 'Manual'}
-                                </span>
+                        {(() => {
+                          const raw = (item.change_type || item.modification_type || '').toLowerCase();
+                          const isTimer = raw === 'scheduled';
+                          const label = isTimer ? 'Timer' : 'Manual';
+                          const bg = isTimer ? '#ffd700' : '#4caf50';
+                          const color = isTimer ? '#000' : '#fff';
+                          return (
+                            <span style={{ padding:'4px 8px', borderRadius:'4px', fontSize:'11px', fontWeight:'bold', backgroundColor:bg, color }}>
+                              {label}
+                            </span>
+                          );
+                        })()}
                               </td>
                             </tr>
                           ))}
@@ -12048,7 +12231,7 @@ const Dashboard = () => {
         if (showHistoryChangesPage) {
           return (
             <HistoryChangesPage
-              onClose={() => setShowHistoryChangesPage(false)}
+              onClose={handleCloseHistoryChanges}
             />
           );
         }
@@ -13970,6 +14153,56 @@ const Dashboard = () => {
         });
       default:
         return renderDashboard();
+      case 'marketing': {
+        const marketingColumns = [
+          { key: 'name', label: 'Name', sortable: true },
+          { key: 'type', label: 'Type', sortable: true },
+          { key: 'description', label: 'Description', sortable: true },
+          { key: 'locations', label: 'Locations', sortable: false, render: (value) => {
+            if (!value || value.length === 0) return 'None';
+            const locationNames = value.map(locId => {
+              const location = locations.find(l => l.id === locId);
+              return location ? location.name : locId;
+            });
+            return locationNames.join(', ');
+          }},
+          { key: 'start_at', label: 'Start Date', sortable: true, render: (value) => formatDateDDMMYYYY(value) },
+          { key: 'end_at', label: 'End Date', sortable: true, render: (value) => formatDateDDMMYYYY(value) },
+          { key: 'status', label: 'Status', sortable: true },
+          { key: 'payouts', label: 'Payouts', sortable: false, render: (value) => {
+            if (!value || value.length === 0) return '0';
+            const totalAmount = value.reduce((sum, payout) => sum + (payout.amount || 0), 0);
+            return `${value.length} (${totalAmount.toFixed(2)} RON)`;
+          }},
+          { key: 'created_at', label: 'Created', sortable: true, render: (value) => formatDateDDMMYYYY(value) },
+          { key: 'created_by', label: 'Created By', sortable: true }
+        ];
+        
+        return renderTable('Marketing Campaigns', marketingCampaigns, marketingColumns, {
+          onAdd: () => { setMarketingForm(emptyMarketingForm); setShowMarketingForm(true); },
+          onEdit: (item) => { setMarketingForm(item); setShowMarketingForm(true); },
+          onDelete: async (id) => {
+            if (confirm('Are you sure you want to delete this campaign?')) {
+              try {
+                const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` };
+                const res = await fetch(`${API}/marketing/campaigns/${id}`, { method: 'DELETE', headers });
+                if (res.ok) {
+                  await fetchMarketingCampaigns();
+                  showCustomNotification('Campaign deleted', 'success');
+                } else {
+                  showCustomNotification('Failed to delete campaign', 'error');
+                }
+              } catch (error) {
+                showCustomNotification('Error deleting campaign', 'error');
+              }
+            }
+          },
+          onBulkEdit: () => handleBulkEdit('marketing'),
+          onBulkDelete: () => handleBulkDelete('marketing'),
+          onExport: () => handleExport('marketing'),
+          onImport: () => handleImport('marketing')
+        }, 'marketing');
+      }
     }
   };
 
@@ -13985,7 +14218,6 @@ const Dashboard = () => {
     <div className={`app-layout ${theme}`}>
       {/* Unified Header */}
       <div className="main-header" style={{
-        background: theme === 'light' ? 'linear-gradient(135deg, #3182ce 0%, #2c5282 100%)' : 'inherit',
         color: theme === 'light' ? 'white' : 'inherit'
       }}>
         <div className="header-left">
@@ -14048,14 +14280,25 @@ const Dashboard = () => {
       </div>
 
       {/* Layout Container */}
-      <div className="layout-container">
+      <div className="layout-container" data-sidebar={isSidebarCollapsed ? 'collapsed' : 'expanded'}>
         {/* Sidebar */}
-        <div className="sidebar">
+        <div className="sidebar" aria-expanded={!isSidebarCollapsed}>
+        <div className="sidebar-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px'}}>
+          <span className="sidebar-title" style={{opacity: isSidebarCollapsed ? 0 : 1, transition:'opacity .15s'}}>Menu</span>
+          <button
+            className="sidebar-toggle"
+            aria-label="Toggle sidebar"
+            aria-pressed={isSidebarCollapsed}
+            onClick={toggleSidebar}
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >{isSidebarCollapsed ? '»' : '«'}</button>
+        </div>
         <nav className="sidebar-nav">
           {navigationItems.map(item => (
             <button
               key={item.id}
               className={`nav-item ${activeView === item.id ? 'active' : ''}`}
+              title={item.label}
               onClick={() => {
                 // Close Commission Date Details page when navigating to other modules
                 if (showCommissionDateDetailsPage) {
@@ -14138,6 +14381,235 @@ const Dashboard = () => {
           jackpots={jackpots}
           showCustomNotification={showCustomNotification}
         />
+      )}
+
+      {/* Marketing Campaign Modal */}
+      {showMarketingForm && (
+        <div className="modal-backdrop" onClick={() => setShowMarketingForm(false)}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h2>{marketingForm.id ? 'Edit Campaign' : 'Create Campaign'}</h2>
+              <button className="modal-close" onClick={() => setShowMarketingForm(false)}>✕</button>
+            </div>
+
+            <form onSubmit={(e) => e.preventDefault()} className="user-form">
+              <div className="form-section">
+                <div className="form-grid">
+                  <div>
+                    <label>Name *</label>
+                    <input 
+                      className="form-input" 
+                      value={marketingForm.name || ''} 
+                      onChange={(e) => setMarketingForm({...marketingForm, name: e.target.value})} 
+                      placeholder="Campaign name"
+                    />
+                  </div>
+                  <div>
+                    <label>Type *</label>
+                    <select 
+                      className="form-input" 
+                      value={marketingForm.type || 'promotion'} 
+                      onChange={(e) => setMarketingForm({...marketingForm, type: e.target.value})}
+                    >
+                      <option value="promotion">Promotion</option>
+                      <option value="tombola">Tombola</option>
+                      <option value="tournament">Tournament</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Start Date *</label>
+                    <input 
+                      type="datetime-local" 
+                      className="form-input" 
+                      value={marketingForm.start_at || ''} 
+                      onChange={(e) => setMarketingForm({...marketingForm, start_at: e.target.value})} 
+                    />
+                  </div>
+                  <div>
+                    <label>End Date *</label>
+                    <input 
+                      type="datetime-local" 
+                      className="form-input" 
+                      value={marketingForm.end_at || ''} 
+                      onChange={(e) => setMarketingForm({...marketingForm, end_at: e.target.value})} 
+                    />
+                  </div>
+                  <div className="form-grid-span">
+                    <label>Locations *</label>
+                    <div className="checkbox-chips">
+                      {locations.map(l => (
+                        <label key={l.id} className="checkbox-chip">
+                          <input 
+                            type="checkbox" 
+                            checked={marketingForm.locations?.includes(l.id) || false} 
+                            onChange={(e) => {
+                              setMarketingForm(prev => {
+                                const set = new Set(prev.locations || []);
+                                if (e.target.checked) set.add(l.id); else set.delete(l.id);
+                                return { ...prev, locations: Array.from(set) };
+                              });
+                            }} 
+                          />
+                          <span>{l.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="form-grid-span">
+                    <label>Description</label>
+                    <textarea 
+                      className="form-textarea" 
+                      rows={3} 
+                      value={marketingForm.description || ''} 
+                      onChange={(e) => setMarketingForm({...marketingForm, description: e.target.value})} 
+                      placeholder="Campaign description"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-section">
+                  <h3>Payouts (explicit dates)</h3>
+                  <div className="payouts-add-row">
+                    <input type="date" id="mp_date" className="form-input" />
+                    <select id="mp_loc" className="form-input">
+                      <option value="">Select Location</option>
+                      {locations.map(l => (<option key={l.id} value={l.id}>{l.name}</option>))}
+                    </select>
+                    <input type="number" min="0" step="0.01" id="mp_amt" placeholder="Amount (RON)" className="form-input" />
+                    <button 
+                      type="button"
+                      className="btn-secondary" 
+                      onClick={() => {
+                        const d = document.getElementById('mp_date').value;
+                        const loc = document.getElementById('mp_loc').value;
+                        const amt = parseFloat(document.getElementById('mp_amt').value || '0');
+                        if (!d || !loc || !amt) {
+                          showCustomNotification('Please fill all payout fields', 'error');
+                          return;
+                        }
+                        setMarketingForm(prev => ({ 
+                          ...prev, 
+                          payouts: [...(prev.payouts || []), { 
+                            date: new Date(d).toISOString(), 
+                            location_id: loc, 
+                            amount: amt 
+                          }] 
+                        }));
+                        // Clear inputs
+                        document.getElementById('mp_date').value = '';
+                        document.getElementById('mp_loc').value = '';
+                        document.getElementById('mp_amt').value = '';
+                      }}
+                    >
+                      Add Payout
+                    </button>
+                  </div>
+                  
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Location</th>
+                          <th>Amount (RON)</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(marketingForm.payouts || []).map((p, idx) => {
+                          const loc = locations.find(l => l.id === p.location_id);
+                          return (
+                            <tr key={idx}>
+                              <td>{formatDateDDMMYYYY(p.date)}</td>
+                              <td>{loc ? loc.name : p.location_id}</td>
+                              <td>{p.amount.toFixed(2)}</td>
+                              <td>
+                                <button 
+                                  type="button"
+                                  className="btn-danger" 
+                                  onClick={() => {
+                                    setMarketingForm(prev => ({
+                                      ...prev,
+                                      payouts: prev.payouts.filter((_, i) => i !== idx)
+                                    }));
+                                  }}
+                                  style={{ padding: '2px 6px', fontSize: '12px' }}
+                                >
+                                  🗑️
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {(!marketingForm.payouts || marketingForm.payouts.length === 0) && (
+                          <tr>
+                            <td colSpan={4} style={{ textAlign: 'center', padding: '10px', color: 'var(--text-secondary)' }}>
+                              No payouts yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-actions">
+                <button type="button" onClick={() => setShowMarketingForm(false)} className="btn-cancel">
+                  Cancel
+                </button>
+                <button 
+                  type="button"
+                  className="btn-save" 
+                  disabled={savingMarketing} 
+                  onClick={async () => {
+                    if (!marketingForm.name || !marketingForm.type || !marketingForm.start_at || !marketingForm.end_at || !marketingForm.locations?.length) {
+                      showCustomNotification('Please fill all required fields', 'error');
+                      return;
+                    }
+                    
+                    setSavingMarketing(true);
+                    try {
+                      const headers = { 
+                        'Content-Type': 'application/json', 
+                        'Authorization': `Bearer ${localStorage.getItem('token')}` 
+                      };
+                      
+                      const method = marketingForm.id ? 'PUT' : 'POST';
+                      const url = marketingForm.id 
+                        ? `${API}/marketing/campaigns/${marketingForm.id}` 
+                        : `${API}/marketing/campaigns`;
+                      
+                      const res = await fetch(url, { 
+                        method, 
+                        headers, 
+                        body: JSON.stringify({ ...marketingForm }) 
+                      });
+                      
+                      if (res.ok) {
+                        setShowMarketingForm(false);
+                        setMarketingForm(emptyMarketingForm);
+                        await fetchMarketingCampaigns();
+                        showCustomNotification(
+                          marketingForm.id ? 'Campaign updated' : 'Campaign created', 
+                          'success'
+                        );
+                      } else {
+                        showCustomNotification('Failed to save campaign', 'error');
+                      }
+                    } catch (error) {
+                      showCustomNotification('Error saving campaign', 'error');
+                    } finally { 
+                      setSavingMarketing(false); 
+                    }
+                  }}
+                >
+                  {savingMarketing ? 'Saving...' : (marketingForm.id ? 'Update Campaign' : 'Create Campaign')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Bulk Edit Form Modal */}
