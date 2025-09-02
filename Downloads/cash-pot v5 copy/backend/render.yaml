@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: cd backend && python server.py
+    startCommand: python server.py
     envVars:
       - key: MONGO_URL
         value: mongodb://localhost:27017
