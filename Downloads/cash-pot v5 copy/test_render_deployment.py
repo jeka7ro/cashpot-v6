@@ -1,210 +1,96 @@
 #!/usr/bin/env python3
 """
-Test script for Render deployment
+Test script to verify Render deployment files are accessible
 """
 
 import requests
 import json
-import sys
-import time
 
-def test_render_backend(backend_url):
-    """Test Render backend"""
-    print(f"🔍 Testing Render backend: {backend_url}")
+def test_github_files():
+    """Test if critical files are accessible from GitHub"""
+    print("🔍 Testing GitHub file access...")
     
-    # Test health endpoint
-    try:
-        print("Testing health endpoint...")
-        response = requests.get(f"{backend_url}/api/health", timeout=30)
-        if response.status_code == 200:
-            print("✅ Backend health check passed")
-        else:
-            print(f"❌ Backend health check failed: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Backend health check error: {e}")
-        return False
-    
-    # Test login endpoint
-    try:
-        print("Testing login endpoint...")
-        login_data = {
-            "username": "admin",
-            "password": "admin123"
-        }
-        
-        response = requests.post(
-            f"{backend_url}/api/auth/login",
-            json=login_data,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "access_token" in data:
-                print("✅ Backend login test passed")
-                return data["access_token"]
-            else:
-                print("❌ Backend login test failed: No access token")
-                return None
-        else:
-            print(f"❌ Backend login test failed: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ Backend login test error: {e}")
-        return None
-
-def test_backend_data_endpoints(backend_url, token):
-    """Test backend data endpoints"""
-    print(f"🔍 Testing backend data endpoints...")
-    
-    headers = {"Authorization": f"Bearer {token}"}
-    endpoints = [
-        "/api/companies",
-        "/api/locations", 
-        "/api/providers",
-        "/api/cabinets",
-        "/api/game-mixes",
-        "/api/slot-machines",
-        "/api/jackpots"
+    base_url = "https://raw.githubusercontent.com/jeka7ro/cashpot-v5/main/"
+    files_to_check = [
+        "Downloads/cash-pot v5 copy/requirements.txt",
+        "Downloads/cash-pot v5 copy/server.py",
+        "Downloads/cash-pot v5 copy/.env"
     ]
     
-    success_count = 0
-    for endpoint in endpoints:
+    all_accessible = True
+    for file_path in files_to_check:
+        full_url = base_url + file_path
         try:
-            response = requests.get(
-                f"{backend_url}{endpoint}",
-                headers=headers,
-                timeout=30
-            )
-            
+            response = requests.get(full_url, timeout=10)
             if response.status_code == 200:
-                data = response.json()
-                print(f"✅ {endpoint}: {len(data)} items")
-                success_count += 1
+                print(f"✅ {file_path} - Accessible")
+                if "requirements.txt" in file_path:
+                    print(f"   Content preview: {response.text[:100]}...")
             else:
-                print(f"❌ {endpoint}: {response.status_code}")
+                print(f"❌ {file_path} - Not accessible (Status: {response.status_code})")
+                all_accessible = False
         except Exception as e:
-            print(f"❌ {endpoint}: {e}")
+            print(f"❌ {file_path} - Error: {e}")
+            all_accessible = False
     
-    print(f"📊 Data endpoints: {success_count}/{len(endpoints)} passed")
-    return success_count == len(endpoints)
+    return all_accessible
 
-def test_frontend_access(frontend_url):
-    """Test frontend accessibility"""
-    print(f"🔍 Testing frontend access: {frontend_url}")
+def test_render_deployment():
+    """Test Render deployment URLs"""
+    print("\n🔍 Testing Render deployment...")
     
-    try:
-        response = requests.get(frontend_url, timeout=30)
-        if response.status_code == 200:
-            if "CASHPOT" in response.text or "Slot Machines" in response.text:
-                print("✅ Frontend access test passed")
-                return True
+    render_urls = [
+        "https://cashpot-backend.onrender.com",
+        "https://cashpot-backend-v5.onrender.com",
+        "https://jeka7ro-cashpot.onrender.com"
+    ]
+    
+    all_up = True
+    for url in render_urls:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                print(f"✅ {url} - Status: {response.status_code}")
             else:
-                print("❌ Frontend access test failed: Content not found")
-                return False
-        else:
-            print(f"❌ Frontend access test failed: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Frontend access test error: {e}")
-        return False
-
-def test_cors_headers(backend_url, frontend_url):
-    """Test CORS headers"""
-    print(f"🔍 Testing CORS headers...")
+                print(f"⚠️  {url} - Status: {response.status_code}")
+                all_up = False
+        except requests.exceptions.RequestException as e:
+            print(f"❌ {url} - Error: {e}")
+            all_up = False
     
-    try:
-        headers = {
-            "Origin": frontend_url,
-            "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "Content-Type"
-        }
-        
-        response = requests.options(
-            f"{backend_url}/api/auth/login",
-            headers=headers,
-            timeout=30
-        )
-        
-        if "Access-Control-Allow-Origin" in response.headers:
-            print("✅ CORS headers test passed")
-            return True
-        else:
-            print("❌ CORS headers test failed: No CORS headers")
-            return False
-    except Exception as e:
-        print(f"❌ CORS headers test error: {e}")
-        return False
+    return all_up
 
 def main():
-    """Main test function"""
-    print("🧪 CASHPOT Render Deployment Test")
-    print("=" * 50)
+    print("🚀============================================================")
+    print("🚀  CASHPOT V5 - Render Deployment Test")
+    print("============================================================\n")
     
-    # Get URLs from user
-    backend_url = input("Enter Render backend URL (e.g., https://cashpot-backend.onrender.com): ").strip()
-    if not backend_url:
-        print("❌ Backend URL is required!")
-        return
+    github_accessible = test_github_files()
+    render_deployed = test_render_deployment()
     
-    frontend_url = input("Enter GitHub Pages frontend URL (default: https://jeka7ro.github.io/cash-pot-v5-copy): ").strip()
-    if not frontend_url:
-        frontend_url = "https://jeka7ro.github.io/cash-pot-v5-copy"
-        print(f"✅ Using default frontend URL: {frontend_url}")
-    
-    print(f"\n🚀 Testing deployment...")
-    print(f"Backend: {backend_url}")
-    print(f"Frontend: {frontend_url}")
-    print()
-    
-    # Test results
-    tests_passed = 0
-    total_tests = 4
-    
-    # Test 1: Render backend
-    token = test_render_backend(backend_url)
-    if token:
-        tests_passed += 1
-        
-        # Test 2: Backend data endpoints
-        if test_backend_data_endpoints(backend_url, token):
-            tests_passed += 1
+    print("\n📋 Summary:")
+    if github_accessible:
+        print("✅ All files are accessible from GitHub")
+        print("   Render should be able to deploy them with correct settings")
     else:
-        print("⚠️  Skipping data endpoints test (backend failed)")
-        total_tests -= 1
+        print("❌ Files are NOT accessible from GitHub")
+        print("   This is the root cause of deployment failures")
     
-    # Test 3: GitHub Pages frontend
-    if test_frontend_access(frontend_url):
-        tests_passed += 1
-    
-    # Test 4: CORS headers
-    if test_cors_headers(backend_url, frontend_url):
-        tests_passed += 1
-    
-    # Results
-    print(f"\n📊 Test Results: {tests_passed}/{total_tests} passed")
-    
-    if tests_passed == total_tests:
-        print("🎉 All tests passed! Your Render deployment is working!")
-        print("\n✅ Your CASHPOT application is live and accessible!")
-        print("🌐 Users can access the application online")
-        print("🗄️  Data is stored in MongoDB Atlas")
-        print("🔧 Backend is running on Render")
-        print("📄 Frontend is hosted on GitHub Pages")
-        
-        print(f"\n🔗 Your application URLs:")
-        print(f"   Frontend: https://jeka7ro.github.io/cash-pot-v5-copy")
-        print(f"   Backend: {backend_url}")
-        
+    if render_deployed:
+        print("✅ Render deployment is up and running")
     else:
-        print("❌ Some tests failed. Please check the issues above.")
-        print("\n🔧 Common fixes:")
-        print("- Check that Render backend is running")
-        print("- Verify environment variables in Render")
-        print("- Check GitHub Pages deployment status")
-        print("- Verify CORS configuration")
-        print("- Check MongoDB Atlas connection")
+        print("❌ Render deployment is not working")
+        print("   Check Render dashboard for specific errors")
+    
+    print("\n🔧 Next Steps:")
+    if not github_accessible:
+        print("1. Fix GitHub file access issues")
+    else:
+        print("1. Update Render dashboard settings:")
+        print("   - Build Command: pip install -r \"Downloads/cash-pot v5 copy/requirements.txt\"")
+        print("   - Start Command: python \"Downloads/cash-pot v5 copy/server.py\"")
+        print("   - Root Directory: (leave empty)")
+        print("2. Redeploy in Render")
 
 if __name__ == "__main__":
     main()
