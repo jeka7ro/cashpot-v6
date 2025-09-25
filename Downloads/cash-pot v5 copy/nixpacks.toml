@@ -1,5 +1,6 @@
 [variables]
 NIXPACKS_PROVIDERS = ["nodejs"]
+NIXPACKS_IGNORE_PATHS = ["cash-pot v5/", "deploy-687cc9f68045b4912ab57737/"]
 
 [phases.setup]
 nixPkgs = ["nodejs", "npm"]

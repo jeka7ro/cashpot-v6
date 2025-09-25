@@ -1,0 +1,32 @@
+# Ignore other cash-pot directories
+cash-pot v5/
+deploy-687cc9f68045b4912ab57737/
+
+# Ignore git
+.git
+.gitignore
+
+# Ignore node_modules in root
+node_modules/
+
+# Ignore other deployment files
+*.md
+*.py
+*.sh
+*.zip
+*.pdf
+*.xlsx
+*.csv
+*.json
+!package.json
+!package-lock.json
+!frontend/package*.json
+
+# Ignore macOS files
+.DS_Store
+*.dmg
+
+# Ignore other files
+*.log
+*.tmp
+*.bak
