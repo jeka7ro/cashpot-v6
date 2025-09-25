@@ -1,151 +1,138 @@
 #!/usr/bin/env python3
 """
-Script to check deployment status and provide quick access to all services
+Script pentru verificarea statusului deploy-ului CASHPOT V5
 """
 
 import requests
-import json
-import os
-from datetime import datetime
+import time
+import sys
 
-def check_service_status(url, service_name):
-    """Check if a service is online"""
+def print_header():
+    """Print header"""
+    print("🔍" + "=" * 60)
+    print("🔍  CASHPOT V5 - DEPLOYMENT STATUS CHECK")
+    print("🔍" + "=" * 60)
+    print()
+
+def check_github_pages():
+    """Check GitHub Pages status"""
+    print("🌐 Checking GitHub Pages...")
+    
+    github_pages_url = "https://jeka7ro.github.io/cashpot-v5"
+    
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(github_pages_url, timeout=10)
         if response.status_code == 200:
-            print(f"✅ {service_name}: Online")
+            print(f"✅ GitHub Pages is live: {github_pages_url}")
             return True
         else:
-            print(f"⚠️  {service_name}: Responding but status {response.status_code}")
+            print(f"⚠️  GitHub Pages returned status {response.status_code}")
             return False
-    except requests.exceptions.Timeout:
-        print(f"⏰ {service_name}: Timeout")
-        return False
-    except requests.exceptions.ConnectionError:
-        print(f"❌ {service_name}: Connection failed")
-        return False
-    except Exception as e:
-        print(f"❌ {service_name}: Error - {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ GitHub Pages not accessible: {e}")
         return False
 
-def load_deployment_config():
-    """Load deployment configuration if it exists"""
-    config_file = "deployment_config.json"
-    if os.path.exists(config_file):
-        with open(config_file, 'r') as f:
-            return json.load(f)
-    return None
+def check_backend():
+    """Check backend status"""
+    print("🔧 Checking backend...")
+    
+    backend_urls = [
+        "https://cashpot-v5.onrender.com",
+        "https://cashpot-v5.onrender.com/api/health"
+    ]
+    
+    for url in backend_urls:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                print(f"✅ Backend is live: {url}")
+                return True
+            else:
+                print(f"⚠️  Backend returned status {response.status_code} for {url}")
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Backend not accessible at {url}: {e}")
+    
+    return False
 
-def save_deployment_config(config):
-    """Save deployment configuration"""
-    with open("deployment_config.json", 'w') as f:
-        json.dump(config, f, indent=2)
+def check_github_actions():
+    """Check GitHub Actions status"""
+    print("⚙️  Checking GitHub Actions...")
+    
+    # GitHub API URL for actions
+    api_url = "https://api.github.com/repos/jeka7ro/cashpot-v5/actions/runs"
+    
+    try:
+        response = requests.get(api_url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('workflow_runs'):
+                latest_run = data['workflow_runs'][0]
+                status = latest_run.get('status', 'unknown')
+                conclusion = latest_run.get('conclusion', 'unknown')
+                
+                print(f"📊 Latest workflow run:")
+                print(f"   Status: {status}")
+                print(f"   Conclusion: {conclusion}")
+                print(f"   URL: {latest_run.get('html_url', 'N/A')}")
+                
+                if status == 'completed' and conclusion == 'success':
+                    print("✅ GitHub Actions deployment successful!")
+                    return True
+                elif status == 'in_progress':
+                    print("⏳ GitHub Actions deployment in progress...")
+                    return False
+                else:
+                    print("❌ GitHub Actions deployment failed or incomplete")
+                    return False
+            else:
+                print("❌ No workflow runs found")
+                return False
+        else:
+            print(f"❌ GitHub API returned status {response.status_code}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"❌ GitHub API not accessible: {e}")
+        return False
 
 def main():
-    """Main status check function"""
-    print("🔍 CASHPOT Deployment Status Check")
-    print("=" * 50)
+    """Main function"""
+    print_header()
     
-    # Load existing config or create new one
-    config = load_deployment_config()
+    print("🔍 Checking deployment status...")
+    print()
     
-    if not config:
-        print("📝 No deployment configuration found. Let's create one!")
-        
-        backend_url = input("Enter backend URL: ").strip()
-        frontend_url = input("Enter frontend URL: ").strip()
-        database_url = input("Enter database URL (optional): ").strip()
-        
-        config = {
-            "backend_url": backend_url,
-            "frontend_url": frontend_url,
-            "database_url": database_url,
-            "last_updated": datetime.now().isoformat()
-        }
-        
-        save_deployment_config(config)
-        print("✅ Configuration saved!")
-    else:
-        print("📋 Using existing configuration:")
-        print(f"   Backend: {config.get('backend_url', 'Not set')}")
-        print(f"   Frontend: {config.get('frontend_url', 'Not set')}")
-        print(f"   Database: {config.get('database_url', 'Not set')}")
-        
-        update = input("\nUpdate configuration? (y/n): ").strip().lower()
-        if update == 'y':
-            backend_url = input(f"Enter backend URL [{config.get('backend_url', '')}]: ").strip()
-            frontend_url = input(f"Enter frontend URL [{config.get('frontend_url', '')}]: ").strip()
-            database_url = input(f"Enter database URL [{config.get('database_url', '')}]: ").strip()
-            
-            if backend_url:
-                config['backend_url'] = backend_url
-            if frontend_url:
-                config['frontend_url'] = frontend_url
-            if database_url:
-                config['database_url'] = database_url
-            
-            config['last_updated'] = datetime.now().isoformat()
-            save_deployment_config(config)
-            print("✅ Configuration updated!")
-    
-    print(f"\n🚀 Checking services...")
-    print("-" * 30)
-    
-    # Check services
-    services_online = 0
-    total_services = 0
+    # Check GitHub Pages
+    pages_status = check_github_pages()
+    print()
     
     # Check backend
-    if config.get('backend_url'):
-        total_services += 1
-        if check_service_status(config['backend_url'], "Backend"):
-            services_online += 1
+    backend_status = check_backend()
+    print()
     
-    # Check frontend
-    if config.get('frontend_url'):
-        total_services += 1
-        if check_service_status(config['frontend_url'], "Frontend"):
-            services_online += 1
+    # Check GitHub Actions
+    actions_status = check_github_actions()
+    print()
     
-    # Check database (if URL provided)
-    if config.get('database_url'):
-        total_services += 1
-        if check_service_status(config['database_url'], "Database"):
-            services_online += 1
+    # Summary
+    print("📋 DEPLOYMENT SUMMARY:")
+    print("-" * 30)
+    print(f"🌐 GitHub Pages: {'✅ Live' if pages_status else '❌ Not accessible'}")
+    print(f"🔧 Backend: {'✅ Live' if backend_status else '❌ Not accessible'}")
+    print(f"⚙️  GitHub Actions: {'✅ Success' if actions_status else '❌ Failed/In progress'}")
     
-    # Results
-    print(f"\n📊 Status Summary: {services_online}/{total_services} services online")
-    
-    if services_online == total_services:
-        print("🎉 All services are online!")
-        print("\n🌐 Your CASHPOT application is fully operational!")
-        print("👥 Multiple users can access the application")
-        print("🗄️  Data is stored in the shared cloud database")
-        
-        print(f"\n🔗 Quick Links:")
-        if config.get('frontend_url'):
-            print(f"   Frontend: {config['frontend_url']}")
-        if config.get('backend_url'):
-            print(f"   Backend API: {config['backend_url']}/api")
-        
+    if pages_status and backend_status:
+        print("\n🎉 DEPLOYMENT SUCCESSFUL!")
+        print("🔗 Your app is live at: https://jeka7ro.github.io/cashpot-v5")
     else:
-        print("⚠️  Some services are offline. Please check the issues above.")
-        
-        print(f"\n🔧 Troubleshooting:")
-        print("1. Check if services are running")
-        print("2. Verify URLs are correct")
-        print("3. Check network connectivity")
-        print("4. Review service logs")
-    
-    # Additional information
-    print(f"\n📋 Additional Information:")
-    print(f"   Configuration file: deployment_config.json")
-    print(f"   Last updated: {config.get('last_updated', 'Unknown')}")
-    
-    if config.get('backend_url'):
-        print(f"\n🧪 Test Commands:")
-        print(f"   Health check: curl {config['backend_url']}/api/health")
-        print(f"   Test login: curl -X POST {config['backend_url']}/api/auth/login -H 'Content-Type: application/json' -d '{{\"username\":\"admin\",\"password\":\"password\"}}'")
+        print("\n⚠️  DEPLOYMENT INCOMPLETE")
+        print("📋 Next steps:")
+        if not actions_status:
+            print("1. Check GitHub Actions workflow in repository")
+        if not backend_status:
+            print("2. Deploy backend to Render or Railway")
+        if not pages_status:
+            print("3. Enable GitHub Pages in repository settings")
+            print("4. Add BACKEND_URL secret to repository")
 
 if __name__ == "__main__":
     main()
