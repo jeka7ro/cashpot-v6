@@ -2887,54 +2887,56 @@ const EntityForm = ({ entityType, entity, onSave, onClose, companies, locations,
       case 'locations':
         return (
           <>
-            <div className="form-group">
-              <label>Location Name *</label>
-              <input
-                type="text"
-                value={formData.name || ''}
-                onChange={(e) => handleChange('name', e.target.value)}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Company *</label>
-              <select
-                value={formData.company_id || ''}
-                onChange={(e) => handleChange('company_id', e.target.value)}
-                required
-              >
-                <option value="">Select Company</option>
-                {companies.map(company => (
-                  <option key={company.id} value={company.id}>{company.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Address *</label>
-              <input
-                type="text"
-                value={formData.address || ''}
-                onChange={(e) => handleChange('address', e.target.value)}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>City *</label>
-              <input
-                type="text"
-                value={formData.city || ''}
-                onChange={(e) => handleChange('city', e.target.value)}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>County *</label>
-              <input
-                type="text"
-                value={formData.county || ''}
-                onChange={(e) => handleChange('county', e.target.value)}
-                required
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-group">
+                <label>Location Name *</label>
+                <input
+                  type="text"
+                  value={formData.name || ''}
+                  onChange={(e) => handleChange('name', e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Company *</label>
+                <select
+                  value={formData.company_id || ''}
+                  onChange={(e) => handleChange('company_id', e.target.value)}
+                  required
+                >
+                  <option value="">Select Company</option>
+                  {companies.map(company => (
+                    <option key={company.id} value={company.id}>{company.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Address *</label>
+                <input
+                  type="text"
+                  value={formData.address || ''}
+                  onChange={(e) => handleChange('address', e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>City *</label>
+                <input
+                  type="text"
+                  value={formData.city || ''}
+                  onChange={(e) => handleChange('city', e.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>County *</label>
+                <input
+                  type="text"
+                  value={formData.county || ''}
+                  onChange={(e) => handleChange('county', e.target.value)}
+                  required
+                />
+              </div>
             </div>
             <div className="form-group">
               <label>Country</label>
@@ -17834,13 +17836,6 @@ const Dashboard = () => {
         }, 'companies');
       case 'locations':
         return renderTable('Locations', locations, [
-          { 
-            key: 'avatar', 
-            label: 'Avatar',
-            render: (item) => (
-                              <AvatarDisplay entityType="locations" entityId={item.id} size={50} entityName={item.name} />
-            )
-          },
           { key: 'name', label: 'Location Name' },
           { key: 'address', label: 'Address' },
           { key: 'city', label: 'City' },
@@ -17949,7 +17944,6 @@ const Dashboard = () => {
         });
       case 'cabinets':
         return renderTable('Cabinets', cabinets, [
-                      { key: 'logo', label: 'Logo', render: (item) => <AvatarDisplay entityType="cabinets" entityId={item.id} size={50} entityName={item.name} /> },
           { key: 'name', label: 'Name' },
           { key: 'model', label: 'Model' },
           { key: 'provider_id', label: 'Provider', render: (item) => {
