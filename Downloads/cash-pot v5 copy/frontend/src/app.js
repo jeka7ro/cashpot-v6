@@ -4,7 +4,7 @@ import './app.css';
 
 
 
-const BACKEND_URL = 'http://localhost:8002';
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://cashpot-v5.onrender.com';
 const API = `${BACKEND_URL}/api`;
 
 // Module-level cache to survive component remounts
