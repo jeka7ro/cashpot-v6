@@ -1,14 +1,19 @@
 {
-  "name": "cashpot-backend",
+  "name": "cashpot-frontend",
   "version": "1.0.0",
-  "type": "module",
-  "description": "CASHPOT Gaming Management System - Backend",
-  "main": "server.py",
+  "description": "CASHPOT Gaming Management System - Frontend",
+  "main": "frontend/src/index.js",
   "scripts": {
-    "start": "python server.py",
+    "start": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "install": "cd frontend && npm ci",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["gaming", "management", "casino", "backend"],
+  "keywords": ["gaming", "management", "casino", "frontend", "react"],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
 }

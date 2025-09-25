@@ -1,3 +1,6 @@
+[variables]
+NIXPACKS_PROVIDERS = ["nodejs"]
+
 [phases.setup]
 nixPkgs = ["nodejs", "npm"]
 
