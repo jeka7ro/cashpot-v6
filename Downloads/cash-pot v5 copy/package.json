@@ -1,19 +1,14 @@
 {
-  "name": "cashpot-gaming-system",
+  "name": "cashpot-backend",
   "version": "1.0.0",
   "type": "module",
-  "description": "CASHPOT Gaming Management System",
-  "main": "index.js",
+  "description": "CASHPOT Gaming Management System - Backend",
+  "main": "server.py",
   "scripts": {
+    "start": "python server.py",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["gaming", "management", "casino"],
+  "keywords": ["gaming", "management", "casino", "backend"],
   "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@eslint/js": "^9.23.0",
-    "eslint": "^9.23.0",
-    "eslint-plugin-react": "^7.37.4",
-    "globals": "^15.15.0"
-  }
+  "license": "ISC"
 }
