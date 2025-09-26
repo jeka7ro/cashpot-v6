@@ -537,12 +537,12 @@ export default function SlotMachines() {
           </div>
           
           {/* Bulk Actions Row */}
-          <div className="flex flex-wrap gap-2 justify-end">
+          <div className="flex flex-wrap gap-2 justify-end w-full">
             <Button 
               onClick={() => setIsBulkEditModalOpen(true)}
               disabled={selectedMachines.length === 0}
               variant="outline"
-              className="border-border bg-card hover:bg-muted"
+              className="border-border bg-card hover:bg-muted flex-shrink-0"
             >
               <Edit className="w-4 h-4 mr-2" />
               Edit ({selectedMachines.length})
@@ -551,7 +551,7 @@ export default function SlotMachines() {
               onClick={handleBulkDelete}
               disabled={selectedMachines.length === 0}
               variant="destructive"
-              className="bg-red-800/80 hover:bg-red-800"
+              className="bg-red-800/80 hover:bg-red-800 flex-shrink-0"
             >
               <Trash2 className="w-4 h-4 mr-2" />
               Delete ({selectedMachines.length})

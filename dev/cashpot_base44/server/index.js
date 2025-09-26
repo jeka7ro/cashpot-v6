@@ -166,7 +166,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Server running on ${HOST}:${PORT}`);
-  console.log(`Data file: ${DATA_FILE}`);
-});
+// For Vercel
+module.exports = app;
+
+// For local development
+if (require.main === module) {
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running on ${HOST}:${PORT}`);
+    console.log(`Data file: ${DATA_FILE}`);
+  });
+}

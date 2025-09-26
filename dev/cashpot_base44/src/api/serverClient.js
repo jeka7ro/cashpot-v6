@@ -1,5 +1,5 @@
 // Server-based API client for data synchronization
-const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'https://cashpot-v6-production.up.railway.app';
+const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'https://cashpot-v6-server.vercel.app';
 
 class ServerClient {
   constructor(entityName) {
