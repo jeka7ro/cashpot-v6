@@ -5,7 +5,6 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const HOST = process.env.HOST || '0.0.0.0';
 
 // Middleware
 app.use(cors());
@@ -171,8 +170,8 @@ module.exports = app;
 
 // For local development
 if (require.main === module) {
-  app.listen(PORT, HOST, () => {
-    console.log(`Server running on ${HOST}:${PORT}`);
-    console.log(`Data file: ${DATA_FILE}`);
-  });
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Data file: ${DATA_FILE}`);
+});
 }
