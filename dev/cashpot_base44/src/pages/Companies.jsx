@@ -28,6 +28,19 @@ export default function Companies() {
 
   useEffect(() => {
     loadCompanies();
+    
+    // Listen for data changes
+    const handleDataChange = (event) => {
+      if (event.detail.entity === 'companies') {
+        setCompanies(event.detail.data);
+      }
+    };
+    
+    window.addEventListener('dataChanged', handleDataChange);
+    
+    return () => {
+      window.removeEventListener('dataChanged', handleDataChange);
+    };
   }, []);
 
   const loadCompanies = async () => {
