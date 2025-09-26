@@ -51,15 +51,8 @@ export const User = createEntity('users');
 
 // Helper function to check server connection
 export const checkServerConnection = async () => {
-  try {
-    const response = await fetch(`${process.env.REACT_APP_SERVER_URL || 'http://localhost:3001'}/api/health`);
-    const data = await response.json();
-    console.log('Server connection status:', data);
-    return data.status === 'OK';
-  } catch (error) {
-    console.error('Server connection failed:', error);
-    return false;
-  }
+  // GitHub Pages doesn't need server connection check
+  return true;
 };
 
 // Helper functions for data retrieval
@@ -158,5 +151,4 @@ export const getProviderAvatar = (providerId) => {
   return null;
 };
 
-// Initialize server connection check
-checkServerConnection();
+// GitHub Pages doesn't need server connection check

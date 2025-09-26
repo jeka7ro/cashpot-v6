@@ -1,177 +1,168 @@
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const mongoose = require('mongoose');
+const config = require('./config');
+
+// Import models
+const Company = require('./models/Company');
+const Location = require('./models/Location');
+const Provider = require('./models/Provider');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Data file path
-const DATA_FILE = path.join(__dirname, 'data.json');
-
-// Initialize data file if it doesn't exist
-if (!fs.existsSync(DATA_FILE)) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({}));
-}
-
-// Load data from file
-const loadData = () => {
-  try {
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error loading data:', error);
-    return {};
-  }
-};
-
-// Save data to file
-const saveData = (data) => {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error('Error saving data:', error);
-    return false;
-  }
-};
-
-// Routes
-app.get('/api/data/:entity', (req, res) => {
-  try {
-    const { entity } = req.params;
-    const data = loadData();
-    const entityData = data[entity] || [];
-    res.json(entityData);
-  } catch (error) {
-    console.error('Error getting data:', error);
-    res.status(500).json({ error: 'Failed to get data' });
-  }
-});
-
-app.post('/api/data/:entity', (req, res) => {
-  try {
-    const { entity } = req.params;
-    const newItem = req.body;
-    
-    const data = loadData();
-    if (!data[entity]) {
-      data[entity] = [];
-    }
-    
-    // Generate ID if not provided
-    if (!newItem.id) {
-      newItem.id = `${entity}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    }
-    
-    // Add created_date if not provided
-    if (!newItem.created_date) {
-      newItem.created_date = new Date().toISOString();
-    }
-    
-    // Add updated_date
-    newItem.updated_date = new Date().toISOString();
-    
-    data[entity].push(newItem);
-    
-    if (saveData(data)) {
-      res.json(newItem);
-    } else {
-      res.status(500).json({ error: 'Failed to save data' });
-    }
-  } catch (error) {
-    console.error('Error creating data:', error);
-    res.status(500).json({ error: 'Failed to create data' });
-  }
-});
-
-app.put('/api/data/:entity/:id', (req, res) => {
-  try {
-    const { entity, id } = req.params;
-    const updatedItem = req.body;
-    
-    const data = loadData();
-    if (!data[entity]) {
-      data[entity] = [];
-    }
-    
-    const index = data[entity].findIndex(item => item.id === id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    
-    // Preserve original created_date
-    updatedItem.created_date = data[entity][index].created_date;
-    updatedItem.updated_date = new Date().toISOString();
-    updatedItem.id = id;
-    
-    data[entity][index] = updatedItem;
-    
-    if (saveData(data)) {
-      res.json(updatedItem);
-    } else {
-      res.status(500).json({ error: 'Failed to update data' });
-    }
-  } catch (error) {
-    console.error('Error updating data:', error);
-    res.status(500).json({ error: 'Failed to update data' });
-  }
-});
-
-app.delete('/api/data/:entity/:id', (req, res) => {
-  try {
-    const { entity, id } = req.params;
-    
-    const data = loadData();
-    if (!data[entity]) {
-      data[entity] = [];
-    }
-    
-    const index = data[entity].findIndex(item => item.id === id);
-    if (index === -1) {
-      return res.status(404).json({ error: 'Item not found' });
-    }
-    
-    data[entity].splice(index, 1);
-    
-    if (saveData(data)) {
-      res.json({ success: true });
-    } else {
-      res.status(500).json({ error: 'Failed to delete data' });
-    }
-  } catch (error) {
-    console.error('Error deleting data:', error);
-    res.status(500).json({ error: 'Failed to delete data' });
-  }
-});
-
-// Get all data
-app.get('/api/data', (req, res) => {
-  try {
-    const data = loadData();
-    res.json(data);
-  } catch (error) {
-    console.error('Error getting all data:', error);
-    res.status(500).json({ error: 'Failed to get data' });
-  }
-});
+// Connect to MongoDB
+mongoose.connect(config.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('Connected to MongoDB'))
+.catch(err => console.error('MongoDB connection error:', err));
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// For Vercel
-module.exports = app;
+// Companies API
+app.get('/api/companies', async (req, res) => {
+  try {
+    const companies = await Company.find().sort({ created_date: -1 });
+    res.json(companies);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-// For local development
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Data file: ${DATA_FILE}`);
-  });
-}
+app.post('/api/companies', async (req, res) => {
+  try {
+    const company = new Company(req.body);
+    await company.save();
+    res.json(company);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/companies/:id', async (req, res) => {
+  try {
+    const company = await Company.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!company) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+    res.json(company);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/companies/:id', async (req, res) => {
+  try {
+    const company = await Company.findByIdAndDelete(req.params.id);
+    if (!company) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Locations API
+app.get('/api/locations', async (req, res) => {
+  try {
+    const locations = await Location.find().sort({ created_date: -1 });
+    res.json(locations);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/locations', async (req, res) => {
+  try {
+    const location = new Location(req.body);
+    await location.save();
+    res.json(location);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/locations/:id', async (req, res) => {
+  try {
+    const location = await Location.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!location) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    res.json(location);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/locations/:id', async (req, res) => {
+  try {
+    const location = await Location.findByIdAndDelete(req.params.id);
+    if (!location) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Providers API
+app.get('/api/providers', async (req, res) => {
+  try {
+    const providers = await Provider.find().sort({ created_date: -1 });
+    res.json(providers);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/providers', async (req, res) => {
+  try {
+    const provider = new Provider(req.body);
+    await provider.save();
+    res.json(provider);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/providers/:id', async (req, res) => {
+  try {
+    const provider = await Provider.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!provider) {
+      return res.status(404).json({ error: 'Provider not found' });
+    }
+    res.json(provider);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/providers/:id', async (req, res) => {
+  try {
+    const provider = await Provider.findByIdAndDelete(req.params.id);
+    if (!provider) {
+      return res.status(404).json({ error: 'Provider not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Start server
+const PORT = config.PORT;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+module.exports = app;
