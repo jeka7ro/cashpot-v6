@@ -1,0 +1,8 @@
+cash-pot v5/
+deploy-687cc9f68045b4912ab57737/
+frontend/
+node_modules/
+.git/
+.DS_Store
+*.log
+*.tmp
