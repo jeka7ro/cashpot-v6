@@ -33,9 +33,25 @@ db = client[os.environ.get('DB_NAME', 'casino_management')]
 app = FastAPI()
 
 # Add CORS middleware
+# Get CORS origins from environment variable
+cors_origins = os.environ.get('CORS_ORIGINS', '["http://localhost:3000"]')
+try:
+    import json
+    cors_origins = json.loads(cors_origins)
+except:
+    cors_origins = ["http://localhost:3000"]
+
+# Add localhost origins for development
+cors_origins.extend([
+    "http://localhost:3000", "http://127.0.0.1:3000", 
+    "http://localhost:3001", "http://127.0.0.1:3001", 
+    "http://localhost:8000", "http://127.0.0.1:8000", 
+    "http://localhost:8002", "http://127.0.0.1:8002"
+])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001", "http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:8002", "http://127.0.0.1:8002"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,9 +60,14 @@ app.add_middleware(
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Health check endpoint
+@app.get("/api/health")
+async def health_check():
+    return {"status": "healthy", "message": "CASHPOT V5 Backend is running"}
+
 # Security
 security = HTTPBearer()
-JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-here')
+JWT_SECRET = os.environ.get('JWT_SECRET_KEY', os.environ.get('JWT_SECRET', 'your-secret-key-here'))
 JWT_ALGORITHM = 'HS256'
 
 # Models
