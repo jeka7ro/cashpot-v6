@@ -77,15 +77,15 @@ export default function CabinetForm({ cabinet, onSubmit, onCancel }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 text-foreground">
+    <form onSubmit={handleSubmit} className="space-y-6 text-gray-900">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-2">
           <Label htmlFor="name">Cabinet Name</Label>
-          <Input id="name" name="name" value={formData.name} onChange={handleChange} required className="bg-input border-border" />
+          <Input id="name" name="name" value={formData.name} onChange={handleChange} required className="bg-white border-gray-300" />
         </div>
         <div className="space-y-2">
           <Label htmlFor="model">Model Number</Label>
-          <Input id="model" name="model" value={formData.model} onChange={handleChange} className="bg-input border-border" />
+          <Input id="model" name="model" value={formData.model} onChange={handleChange} className="bg-white border-gray-300" />
         </div>
       </div>
       
@@ -93,7 +93,7 @@ export default function CabinetForm({ cabinet, onSubmit, onCancel }) {
         <div className="space-y-2">
           <Label htmlFor="provider_id">Provider</Label>
           <Select value={formData.provider_id} onValueChange={(value) => handleSelectChange('provider_id', value)} required>
-            <SelectTrigger id="provider_id" className="bg-input border-border">
+            <SelectTrigger id="provider_id" className="bg-white border-gray-300">
               <SelectValue placeholder="Select a provider" />
             </SelectTrigger>
             <SelectContent>
@@ -106,7 +106,7 @@ export default function CabinetForm({ cabinet, onSubmit, onCancel }) {
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={formData.status} onValueChange={(value) => handleSelectChange('status', value)}>
-            <SelectTrigger id="status" className="bg-input border-border">
+            <SelectTrigger id="status" className="bg-white border-gray-300">
               <SelectValue placeholder="Select status" />
             </SelectTrigger>
             <SelectContent>

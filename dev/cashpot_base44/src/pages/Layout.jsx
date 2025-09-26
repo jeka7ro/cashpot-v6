@@ -161,10 +161,11 @@ export default function Layout({ children, currentPageName }) {
     { title: "Warehouse", url: createPageUrl("Warehouse"), icon: Building2, count: counts.warehouse },
     { 
       title: "Metrology", 
-      url: createPageUrl("Metrology"), 
+      url: createPageUrl("MetrologyMain"), 
       icon: FlaskConical, 
-      count: counts.metrology,
+      count: counts.slots,
       submenu: [
+        { title: "Certificate Metrologice", url: createPageUrl("Metrology"), icon: FileText, count: counts.metrology },
         { title: "Aprobări de tip", url: createPageUrl("MetrologyApprovals"), icon: FileCheck, count: counts.metrologyApprovals },
         { title: "Comisii", url: createPageUrl("MetrologyCommissions"), icon: Users, count: counts.metrologyCommissions },
         { title: "Autorități Metrologice", url: createPageUrl("MetrologyAuthorities"), icon: Building, count: counts.metrologyAuthorities },
@@ -175,7 +176,8 @@ export default function Layout({ children, currentPageName }) {
     { title: "Invoices", url: createPageUrl("Invoices"), icon: FileText, count: counts.invoices },
     { title: "ONJN Reports", url: createPageUrl("ONJNReports"), icon: BarChart3, count: 0 },
     { title: "Legal Documents", url: createPageUrl("LegalDocuments"), icon: FileText, count: 3 },
-    { title: "Users", url: createPageUrl("Users"), icon: Users, count: counts.users }
+    { title: "Users", url: createPageUrl("Users"), icon: Users, count: counts.users },
+    { title: "Settings", url: createPageUrl("Settings"), icon: Settings, count: null }
   ];
 
   const toggleMenu = (menuTitle) => {
@@ -213,7 +215,7 @@ export default function Layout({ children, currentPageName }) {
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-background">
+    <div className="min-h-screen flex w-full bg-background light">
       <style>{`
         .nav-item {
           display: flex;
@@ -251,12 +253,29 @@ export default function Layout({ children, currentPageName }) {
       `}</style>
 
       {/* Sidebar */}
-      <div className="w-64 bg-sidebar-background border-r border-sidebar-border flex flex-col sidebar">
+      <div className="w-64 bg-sidebar-background border-r border-sidebar-border flex flex-col">
         {/* Header */}
         <div className="p-6 border-b border-sidebar-border">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">C</span>
+            <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
+              <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="16" fill="#000000"/>
+                <g fill="#FFD700" opacity="0.9">
+                  <path d="M16 2 L17.5 6 L22 4.5 L18.5 8 L20 12.5 L16 10 L12 12.5 L13.5 8 L10 4.5 L14.5 6 Z"/>
+                  <path d="M30 16 L26 17.5 L27.5 22 L23 18.5 L18.5 20 L21 16 L18.5 12 L23 13.5 L27.5 10 L26 14.5 Z"/>
+                  <path d="M16 30 L14.5 26 L10 27.5 L13.5 23 L12 18.5 L16 21 L20 18.5 L18.5 23 L22 27.5 L17.5 26 Z"/>
+                  <path d="M2 16 L6 14.5 L4.5 10 L8 13.5 L12.5 12 L10 16 L12.5 20 L8 18.5 L4.5 22 L6 17.5 Z"/>
+                  <path d="M25.5 6.5 L23 8 L24.5 10.5 L22 9 L19.5 10.5 L21.5 8 L19.5 5.5 L22 7 L24.5 4.5 L23 6 Z"/>
+                  <path d="M6.5 6.5 L9 8 L7.5 10.5 L10 9 L12.5 10.5 L10.5 8 L12.5 5.5 L10 7 L7.5 4.5 L9 6 Z"/>
+                  <path d="M25.5 25.5 L23 24 L24.5 21.5 L22 23 L19.5 21.5 L21.5 24 L19.5 26.5 L22 25 L24.5 27.5 L23 26 Z"/>
+                  <path d="M6.5 25.5 L9 24 L7.5 21.5 L10 23 L12.5 21.5 L10.5 24 L12.5 26.5 L10 25 L7.5 27.5 L9 26 Z"/>
+                </g>
+                <g fill="#FFD700" stroke="#FFD700" strokeWidth="0.5">
+                  <line x1="16" y1="8" x2="16" y2="24" stroke="#FFD700" strokeWidth="2"/>
+                  <path d="M12 10 C12 8, 14 6, 16 6 C18 6, 20 8, 20 10 C20 12, 18 14, 16 14 C14 14, 12 16, 12 18 C12 20, 14 22, 16 22 C18 22, 20 20, 20 18" 
+                        fill="none" stroke="#FFD700" strokeWidth="2.5" strokeLinecap="round"/>
+                </g>
+              </svg>
             </div>
             <div>
               <h2 className="font-bold text-lg text-sidebar-primary">CASHPOT</h2>
@@ -365,7 +384,9 @@ export default function Layout({ children, currentPageName }) {
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <Settings className="w-4 h-4 mr-2" />
-                  System Settings
+                  <a href="/Settings" className="nav-item">
+                    System Settings
+                  </a>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive">

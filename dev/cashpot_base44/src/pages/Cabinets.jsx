@@ -268,7 +268,7 @@ export default function Cabinets() {
                     <Badge className={getStatusColor(cabinet.status)}>{cabinet.status}</Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {format(new Date(cabinet.created_date), 'MMM d, yyyy')}
+                    {cabinet.created_date && cabinet.created_date !== '' && !isNaN(new Date(cabinet.created_date).getTime()) ? format(new Date(cabinet.created_date), 'MMM d, yyyy') : 'N/A'}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">

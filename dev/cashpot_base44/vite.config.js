@@ -16,10 +16,16 @@ export default defineConfig({
     extensions: ['.mjs', '.js', '.jsx', '.ts', '.tsx', '.json']
   },
   optimizeDeps: {
+    exclude: ['googleapis'],
     esbuildOptions: {
       loader: {
         '.js': 'jsx',
       },
     },
   },
+  build: {
+    rollupOptions: {
+      external: ['googleapis']
+    }
+  }
 })

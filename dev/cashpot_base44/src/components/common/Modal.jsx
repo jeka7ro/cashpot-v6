@@ -19,12 +19,12 @@ export default function Modal({ isOpen, onClose, title, children }) {
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.9, opacity: 0, y: 20 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="relative w-full max-w-4xl max-h-[90vh] bg-card border border-border rounded-xl shadow-2xl overflow-hidden"
+            className="relative w-full max-w-4xl max-h-[90vh] bg-white border border-gray-300 rounded-xl shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-6 border-b border-border">
-              <h3 className="text-xl font-bold text-foreground">{title}</h3>
-              <Button variant="ghost" size="icon" onClick={onClose} className="text-muted-foreground hover:bg-muted hover:text-white">
+            <div className="flex items-center justify-between p-6 border-b border-gray-300">
+              <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+              <Button variant="ghost" size="icon" onClick={onClose} className="text-gray-600 hover:bg-gray-100 hover:text-gray-900">
                 <X className="w-5 h-5" />
               </Button>
             </div>

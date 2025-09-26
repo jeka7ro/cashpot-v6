@@ -33,26 +33,26 @@ export default function CabinetBulkEditForm({ onSubmit, onCancel, selectionCount
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 text-foreground">
-      <p className="text-muted-foreground text-sm">
+    <form onSubmit={handleSubmit} className="space-y-6 text-gray-900">
+      <p className="text-gray-600 text-sm">
         Completați doar câmpurile pe care doriți să le actualizați pentru cele <strong>{selectionCount}</strong> cabinete selectate. 
         Câmpurile lăsate goale nu vor fi modificate.
       </p>
       
       <div className="space-y-2">
         <Label htmlFor="name">Cabinet Name</Label>
-        <Input id="name" name="name" value={formData.name} onChange={handleChange} className="bg-input border-border" placeholder="Păstrează valoarea originală"/>
+        <Input id="name" name="name" value={formData.name} onChange={handleChange} className="bg-white border-gray-300" placeholder="Păstrează valoarea originală"/>
       </div>
       
       <div className="space-y-2">
         <Label htmlFor="model">Model</Label>
-        <Input id="model" name="model" value={formData.model} onChange={handleChange} className="bg-input border-border" placeholder="Păstrează valoarea originală"/>
+        <Input id="model" name="model" value={formData.model} onChange={handleChange} className="bg-white border-gray-300" placeholder="Păstrează valoarea originală"/>
       </div>
       
       <div className="space-y-2">
         <Label htmlFor="provider_id">Provider</Label>
         <Select value={formData.provider_id} onValueChange={(value) => handleSelectChange('provider_id', value)}>
-          <SelectTrigger className="bg-input border-border">
+          <SelectTrigger className="bg-white border-gray-300">
             <SelectValue placeholder="Păstrează valoarea originală" />
           </SelectTrigger>
           <SelectContent>
@@ -64,7 +64,7 @@ export default function CabinetBulkEditForm({ onSubmit, onCancel, selectionCount
       <div className="space-y-2">
         <Label htmlFor="status">Status</Label>
         <Select value={formData.status} onValueChange={(value) => handleSelectChange('status', value)}>
-          <SelectTrigger className="bg-input border-border">
+          <SelectTrigger className="bg-white border-gray-300">
             <SelectValue placeholder="Păstrează valoarea originală" />
           </SelectTrigger>
           <SelectContent>

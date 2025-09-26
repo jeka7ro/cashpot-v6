@@ -220,7 +220,7 @@ export default function SlotMachineDetail() {
               <DetailItem icon={Monitor} label="Cabinet" value={relatedData.cabinet?.name} />
               <DetailItem icon={Gamepad2} label="Game Mix" value={relatedData.gameMix?.name} />
               <DetailItem icon={Calendar} label="Production Year" value={machine.production_year} />
-              <DetailItem icon={Calendar} label="Commission Date" value={machine.commission_date ? format(new Date(machine.commission_date), 'PP') : 'N/A'} />
+              <DetailItem icon={Calendar} label="Commission Date" value={machine.commission_date && machine.commission_date !== '' && !isNaN(new Date(machine.commission_date).getTime()) ? format(new Date(machine.commission_date), 'PP') : 'N/A'} />
               <DetailItem icon={Wrench} label="Gaming Places" value={machine.gaming_places} />
             </CardContent>
           </Card>
@@ -532,7 +532,7 @@ export default function SlotMachineDetail() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {relatedData.gameMix.games.map((game, index) => (
+                    {(Array.isArray(relatedData.gameMix.games) ? relatedData.gameMix.games : (relatedData.gameMix.games || '').split(',').map(g => g.trim())).map((game, index) => (
                       <div key={index} className="p-3 bg-muted/30 rounded-lg border border-border/50">
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0"></div>

@@ -280,13 +280,13 @@ export default function GameMixDetail() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Gamepad2 className="w-5 h-5 text-blue-400" />
-              Games ({gameMix.games?.length || 0})
+              Games ({Array.isArray(gameMix.games) ? gameMix.games.length : (gameMix.games || '').split(',').filter(g => g.trim()).length})
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {gameMix.games && gameMix.games.length > 0 ? (
+            {gameMix.games && (Array.isArray(gameMix.games) ? gameMix.games.length > 0 : gameMix.games.trim()) ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                {gameMix.games.map((game, index) => (
+                {(Array.isArray(gameMix.games) ? gameMix.games : gameMix.games.split(',').map(g => g.trim())).map((game, index) => (
                   <div key={index} className="p-3 bg-muted/30 rounded-lg border border-border/50">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0"></div>

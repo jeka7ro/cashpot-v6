@@ -11,6 +11,7 @@ export default function PlatformForm({ platform, onSubmit, onCancel }) {
     name: '',
     description: '',
     provider_id: '',
+    serial_numbers: '',
     status: 'active'
   });
   const [providers, setProviders] = useState([]);
@@ -25,10 +26,19 @@ export default function PlatformForm({ platform, onSubmit, onCancel }) {
 
   useEffect(() => {
     if (platform) {
+      // Handle both array and string formats for serial_numbers
+      let serialNumbersString = '';
+      if (Array.isArray(platform.serial_numbers)) {
+        serialNumbersString = platform.serial_numbers.join('\n');
+      } else if (typeof platform.serial_numbers === 'string') {
+        serialNumbersString = platform.serial_numbers.replace(/,/g, '\n');
+      }
+      
       setFormData({
         name: platform.name || '',
         description: platform.description || '',
         provider_id: platform.provider_id || '',
+        serial_numbers: serialNumbersString,
         status: platform.status || 'active'
       });
     } else {
@@ -36,6 +46,7 @@ export default function PlatformForm({ platform, onSubmit, onCancel }) {
         name: '',
         description: '',
         provider_id: '',
+        serial_numbers: '',
         status: 'active'
       });
     }
@@ -43,7 +54,11 @@ export default function PlatformForm({ platform, onSubmit, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit(formData);
+    const submitData = {
+      ...formData,
+      serial_numbers: formData.serial_numbers.split('\n').map(sn => sn.trim()).filter(sn => sn.length > 0)
+    };
+    onSubmit(submitData);
   };
 
   const handleChange = (field, value) => {
@@ -89,6 +104,20 @@ export default function PlatformForm({ platform, onSubmit, onCancel }) {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="serial_numbers">Serial Numbers</Label>
+        <Textarea
+          id="serial_numbers"
+          value={formData.serial_numbers}
+          onChange={(e) => handleChange('serial_numbers', e.target.value)}
+          placeholder="Enter serial numbers, one per line"
+          rows={4}
+        />
+        <p className="text-sm text-muted-foreground mt-1">
+          Add serial numbers one per line (like in Game Mix)
+        </p>
       </div>
 
       <div>

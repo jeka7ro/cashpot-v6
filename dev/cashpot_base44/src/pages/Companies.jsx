@@ -267,7 +267,7 @@ export default function Companies() {
                     <Badge className={`status-badge ${getStatusColor(company.status)}`}>{company.status}</Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {format(new Date(company.created_date), 'MMM d, yyyy')}
+                    {company.created_date && company.created_date !== '' && !isNaN(new Date(company.created_date).getTime()) ? format(new Date(company.created_date), 'MMM d, yyyy') : 'N/A'}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">

@@ -11,6 +11,8 @@ import MetrologyApprovals from "./MetrologyApprovals";
 import MetrologyCommissions from "./MetrologyCommissions";
 import MetrologyAuthorities from "./MetrologyAuthorities";
 import MetrologySoftware from "./MetrologySoftware";
+import MetrologyMain from "./MetrologyMain";
+import Settings from "./Settings";
 
 import Locations from "./Locations";
 
@@ -52,6 +54,8 @@ const PAGES = {
     MetrologyApprovals: MetrologyApprovals,
     MetrologyCommissions: MetrologyCommissions,
     MetrologyAuthorities: MetrologyAuthorities,
+    MetrologyMain: MetrologyMain,
+    Settings: Settings,
     
     Locations: Locations,
     
@@ -82,6 +86,11 @@ const PAGES = {
 }
 
 function _getCurrentPage(url) {
+    // Remove base path for GitHub Pages
+    if (url.startsWith('/cashpot-v6')) {
+        url = url.replace('/cashpot-v6', '');
+    }
+    
     if (url.endsWith('/')) {
         url = url.slice(0, -1);
     }
@@ -109,18 +118,25 @@ function PagesContent() {
                 <Route path="/Dashboard" element={<Dashboard />} />
                 
                 <Route path="/Companies" element={<Companies />} />
+                <Route path="/companies" element={<Companies />} />
                 
                 <Route path="/SlotMachines" element={<SlotMachines />} />
+                <Route path="/slotmachines" element={<SlotMachines />} />
                 
                 <Route path="/Metrology" element={<Metrology />} />
                 <Route path="/MetrologyApprovals" element={<MetrologyApprovals />} />
                 <Route path="/MetrologyCommissions" element={<MetrologyCommissions />} />
                 <Route path="/MetrologyAuthorities" element={<MetrologyAuthorities />} />
                 <Route path="/MetrologySoftware" element={<MetrologySoftware />} />
+                <Route path="/MetrologyMain" element={<MetrologyMain />} />
+                <Route path="/metrologymain" element={<MetrologyMain />} />
+                <Route path="/Settings" element={<Settings />} />
                 
                 <Route path="/Locations" element={<Locations />} />
+                <Route path="/locations" element={<Locations />} />
                 
                 <Route path="/Providers" element={<Providers />} />
+                <Route path="/providers" element={<Providers />} />
                 
                 <Route path="/Cabinets" element={<Cabinets />} />
                 
@@ -151,7 +167,7 @@ function PagesContent() {
 
 export default function Pages() {
     return (
-        <Router>
+        <Router basename="/cashpot-v6">
             <PagesContent />
         </Router>
     );

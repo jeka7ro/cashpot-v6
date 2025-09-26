@@ -529,16 +529,16 @@ export default function GameMixes() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-300">Game Count</label>
-                <p className="text-white">{viewingGameMix.games?.length || 0}</p>
+                <p className="text-white">{Array.isArray(viewingGameMix.games) ? viewingGameMix.games.length : (viewingGameMix.games || '').split(',').filter(g => g.trim()).length}</p>
               </div>
             </div>
             
-            {viewingGameMix.games && viewingGameMix.games.length > 0 && (
+            {viewingGameMix.games && (Array.isArray(viewingGameMix.games) ? viewingGameMix.games.length > 0 : viewingGameMix.games.trim()) && (
               <div>
                 <label className="text-sm font-medium text-gray-300 mb-2 block">Games</label>
                 <div className="bg-gray-800 rounded-lg p-4 max-h-60 overflow-y-auto">
                   <div className="grid grid-cols-1 gap-2">
-                    {viewingGameMix.games.map((game, index) => (
+                    {(Array.isArray(viewingGameMix.games) ? viewingGameMix.games : viewingGameMix.games.split(',').map(g => g.trim())).map((game, index) => (
                       <div key={index} className="flex items-center justify-between p-2 bg-gray-700 rounded">
                         <span className="text-white">{game}</span>
                       </div>

@@ -412,7 +412,7 @@ export default function Users() {
                   </TableCell>
                   <TableCell className="table-cell">
                     <span className="text-muted-foreground text-sm">
-                      {user.created_date && !isNaN(new Date(user.created_date).getTime()) 
+                      {user.created_date && user.created_date !== '' && !isNaN(new Date(user.created_date).getTime()) 
                         ? format(new Date(user.created_date), 'MMM d, yyyy')
                         : 'N/A'
                       }

@@ -10,7 +10,6 @@ export default function SlotMachineForm({ slotMachine, onSubmit, onCancel }) {
     cabinet_id: '',
     game_mix_id: '',
     provider_id: '',
-    model: '',
     serial_number: '',
     denomination: 0.01,
     max_bet: 100.00,
@@ -62,7 +61,6 @@ export default function SlotMachineForm({ slotMachine, onSubmit, onCancel }) {
         cabinet_id: '',
         game_mix_id: '',
         provider_id: '',
-        model: '',
         serial_number: '',
         denomination: 0.01,
         max_bet: 100.00,
@@ -101,14 +99,10 @@ export default function SlotMachineForm({ slotMachine, onSubmit, onCancel }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 text-foreground">
       {/* Basic Information */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
         <div className="space-y-2">
           <Label htmlFor="serial_number">Serial Number *</Label>
           <Input id="serial_number" name="serial_number" value={formData.serial_number} onChange={handleChange} required className="bg-input border-border" />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="model">Model *</Label>
-          <Input id="model" name="model" value={formData.model} onChange={handleChange} required className="bg-input border-border" />
         </div>
       </div>
       

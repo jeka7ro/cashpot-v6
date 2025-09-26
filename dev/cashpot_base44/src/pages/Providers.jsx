@@ -165,7 +165,7 @@ export default function Providers() {
               className="bg-card border-border pl-9"
             />
           </div>
-          <Button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-700">
+          <Button onClick={handleAdd} className="bg-primary hover:bg-primary/90 text-primary-foreground">
             <Plus className="w-4 h-4 mr-2" />
             Add Provider
           </Button>
@@ -216,7 +216,7 @@ export default function Providers() {
           <TableBody>
             {isLoading ? (
               Array(5).fill(0).map((_, i) => (
-                <TableRow key={i} className="border-border animate-pulse">
+                <TableRow key={i} className="table-row animate-pulse">
                   <TableCell><div className="h-4 bg-muted rounded w-4 mx-auto"></div></TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
@@ -234,7 +234,7 @@ export default function Providers() {
               ))
             ) : (
               filteredProviders.map(provider => (
-                <TableRow key={provider.id} className="border-border">
+                <TableRow key={provider.id} className="table-row hover:bg-muted/50">
                   <TableCell className="text-center">
                     <input 
                       type="checkbox" 
