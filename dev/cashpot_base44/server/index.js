@@ -170,8 +170,8 @@ module.exports = app;
 
 // For local development
 if (require.main === module) {
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Data file: ${DATA_FILE}`);
-});
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Data file: ${DATA_FILE}`);
+  });
 }

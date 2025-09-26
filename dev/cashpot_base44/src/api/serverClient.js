@@ -1,5 +1,5 @@
 // Server-based API client for data synchronization
-const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'http://localhost:3001';
+const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'https://cashpot-v6.netlify.app';
 
 class ServerClient {
   constructor(entityName) {
