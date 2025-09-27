@@ -1,5 +1,5 @@
 // Authentication API for Cashpot V6
-const API_BASE_URL = '/api';
+const API_BASE_URL = 'https://cashpot-v6.onrender.com/api';
 
 // Get auth token from localStorage
 const getAuthToken = () => {
