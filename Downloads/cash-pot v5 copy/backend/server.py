@@ -33,9 +33,34 @@ db = client[os.environ.get('DB_NAME', 'casino_management')]
 app = FastAPI()
 
 # Add CORS middleware
+# Get CORS origins from environment variable or use defaults
+cors_origins_env = os.environ.get('CORS_ORIGINS', '[]')
+try:
+    import json
+    cors_origins = json.loads(cors_origins_env) if cors_origins_env else []
+except:
+    cors_origins = []
+
+# Default origins for development
+default_origins = [
+    "http://localhost:3000", 
+    "http://127.0.0.1:3000", 
+    "http://localhost:3001", 
+    "http://127.0.0.1:3001", 
+    "http://localhost:8000", 
+    "http://127.0.0.1:8000", 
+    "http://localhost:8002", 
+    "http://127.0.0.1:8002",
+    "https://jeka7ro.github.io",
+    "https://jeka7ro.github.io/cashpot-v5"
+]
+
+# Combine environment origins with defaults
+all_origins = list(set(cors_origins + default_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001", "http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:8002", "http://127.0.0.1:8002"],
+    allow_origins=all_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
