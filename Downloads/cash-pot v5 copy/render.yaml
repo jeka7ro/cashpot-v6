@@ -3,8 +3,8 @@ services:
     name: cashpot-backend
     env: python
     plan: free
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: python backend/server.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
     envVars:
       - key: MONGO_URL
         value: mongodb+srv://cashpot:password123@cluster0.mongodb.net/casino_management?retryWrites=true&w=majority
