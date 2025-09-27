@@ -2,8 +2,8 @@ import { base44 } from './base44Client';
 import { getGoogleSheetsData, convertSheetsDataToObjects, parseSlotMachineData, getUniqueLocations, getUniqueManufacturers, getUniqueGameMixes, getUniqueCabinets } from '../config/googleSheets.js';
 import { apiRequest } from './auth.js';
 
-// API base URL - Using local backend
-const API_BASE_URL = '/api';
+// API base URL - Connected to backend on Vercel
+const API_BASE_URL = 'https://cashpotbase44-oovbe0ok8-jeka7ros-projects.vercel.app/api';
 
 // Fallback to localStorage
 const getLocalStorageData = (endpoint) => {
