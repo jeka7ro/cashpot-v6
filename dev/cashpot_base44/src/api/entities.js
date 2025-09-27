@@ -2,7 +2,7 @@ import { base44 } from './base44Client';
 import { getGoogleSheetsData, convertSheetsDataToObjects, parseSlotMachineData, getUniqueLocations, getUniqueManufacturers, getUniqueGameMixes, getUniqueCabinets } from '../config/googleSheets.js';
 
 // API base URL
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'https://cashpot-v6-clean-p98y0cs1l-jeka7ros-projects.vercel.app/api';
 
 // Generic API functions
 const apiRequest = async (endpoint, options = {}) => {
@@ -25,7 +25,7 @@ const apiRequest = async (endpoint, options = {}) => {
     return await response.json();
   } catch (error) {
     console.error(`API request failed for ${endpoint}:`, error);
-    // Fallback to localStorage for now
+    // For debugging - still try localStorage as last resort
     return getLocalStorageData(endpoint);
   }
 };
@@ -38,17 +38,10 @@ const getLocalStorageData = (endpoint) => {
 };
 
 
-// Company entity using localStorage for persistence
+// Company entity using ONLINE API for persistence
 export const Company = {
   async list() {
-    try {
-      // Get data from localStorage
-      const localData = localStorage.getItem('companies');
-      if (localData) {
-        const companies = JSON.parse(localData);
-        console.log(`Loaded ${companies.length} companies from localStorage`);
-        return companies;
-      }
+    return await apiRequest('/companies');
       return [];
     } catch (error) {
       console.error('Error fetching companies:', error);
