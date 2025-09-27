@@ -328,6 +328,21 @@ export default function Layout({ children, currentPageName }) {
               </div>
             );
           })}
+          
+          {/* Version info at bottom */}
+          <div className="mt-auto pt-4 border-t border-border text-center text-xs text-muted-foreground">
+            <p className="font-semibold text-foreground">CASHPOT V6 ERP</p>
+            <p>Version 1.0.0</p>
+            <p>{new Date().toLocaleDateString('ro-RO', { 
+              year: 'numeric', 
+              month: 'short', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+            <p className="mt-2 text-green-600">🔒 Online • 📊 Cloud</p>
+            <p>👥 Multi-user • 📁 Files</p>
+          </div>
         </nav>
       </div>
 
