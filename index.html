@@ -1,14 +1,63 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cashpot v6 - Slot Management System</title>
-    <script type="module" crossorigin src="/assets/index-ZvtKqhKv.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BvY2mqbG.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CASHPOT V6 ERP - Login</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); width: 400px; max-width: 90%; }
+        .logo { text-align: center; margin-bottom: 30px; }
+        .logo h1 { color: #333; margin: 0; font-size: 28px; }
+        .logo p { color: #666; margin: 5px 0 0 0; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #333; font-weight: bold; }
+        .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
+        .btn { width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; transition: background 0.3s; }
+        .btn:hover { background: #5a6fd8; }
+        .info { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; border-left: 4px solid #667eea; }
+        .info h3 { margin: 0 0 10px 0; color: #333; }
+        .info p { margin: 5px 0; color: #666; }
+        .backend-url { background: #e3f2fd; padding: 10px; border-radius: 5px; margin-top: 10px; }
+        .backend-url code { background: #f5f5f5; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>🏦 CASHPOT V6</h1>
+            <p>Gaming Management System</p>
+        </div>
+        
+        <div class="info">
+            <h3>✅ Aplicația este LIVE!</h3>
+            <p><strong>Backend API:</strong> Funcțional pe Vercel</p>
+            <p><strong>Database:</strong> MongoDB Cloud</p>
+            <p><strong>Autentificare:</strong> JWT cu roluri</p>
+            
+            <div class="backend-url">
+                <strong>Backend URL:</strong><br>
+                <code>https://cashpot-v6-clean-hk7gsjoco-jeka7ros-projects.vercel.app</code>
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <h4>🔐 Date de Login:</h4>
+                <p><strong>Admin:</strong> username: <code>admin</code>, password: <code>admin123</code></p>
+                <p><strong>User:</strong> username: <code>test</code>, password: <code>test123</code></p>
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <h4>🚀 Cum să accesezi aplicația:</h4>
+                <p>1. Deschide browser-ul</p>
+                <p>2. Accesează backend-ul direct</p>
+                <p>3. Folosește datele de login de mai sus</p>
+                <p>4. Toate datele sunt salvate în MongoDB cloud!</p>
+            </div>
+        </div>
+        
+        <button class="btn" onclick="window.open(\"https://cashpot-v6-clean-hk7gsjoco-jeka7ros-projects.vercel.app\", \"_blank\")">
+            🚀 ACCESEAZĂ BACKEND-UL
+        </button>
+    </div>
+</body>
 </html>
