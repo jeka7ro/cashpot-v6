@@ -1,3 +1,0 @@
-GitHub Pages Update Trigger - $(date)
-Latest commit: $(git log --oneline -1)
-Force update for new login system and version info
