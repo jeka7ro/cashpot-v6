@@ -1,0 +1,194 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Provider {
+  id                 String              @id @default(cuid())
+  name               String              @unique
+  avatar             String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  cabinets           Cabinet[]
+  gameMixes          GameMix[]
+  slots              SlotMachine[]
+  metrologyApprovals MetrologyApproval[]
+  metrologySoftware  MetrologySoftware[]
+}
+
+model Location {
+  id        String        @id @default(cuid())
+  name      String        @unique
+  address   String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  slots     SlotMachine[]
+  invoices  Invoice[]
+}
+
+model Cabinet {
+  id                 String              @id @default(cuid())
+  name               String
+  model              String?
+  manufacturer       String
+  providerId         String
+  provider           Provider            @relation(fields: [providerId], references: [id])
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  slots              SlotMachine[]
+  metrologyApprovals MetrologyApproval[]
+  metrologySoftware  MetrologySoftware[]
+
+  @@unique([name, manufacturer])
+}
+
+model GameMix {
+  id                 String              @id @default(cuid())
+  name               String
+  providerId         String
+  provider           Provider            @relation(fields: [providerId], references: [id])
+  games              String?
+  gameCount          Int?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  slots              SlotMachine[]
+  metrologyApprovals MetrologyApproval[]
+  metrologySoftware  MetrologySoftware[]
+
+  @@unique([name, providerId])
+}
+
+model SlotMachine {
+  id             String    @id @default(cuid())
+  serialNumber   String    @unique
+  manufacturer   String
+  providerId     String
+  provider       Provider  @relation(fields: [providerId], references: [id])
+  cabinetId      String
+  cabinet        Cabinet   @relation(fields: [cabinetId], references: [id])
+  gameMixId      String?
+  gameMix        GameMix?  @relation(fields: [gameMixId], references: [id])
+  locationId     String?
+  location       Location? @relation(fields: [locationId], references: [id])
+  productionYear Int?
+  denomination   Float?
+  maxBet         Float?
+  rtp            Float?
+  gamingPlaces   Int       @default(1)
+  status         String    @default("active")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  address   String?
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Invoice {
+  id            String    @id @default(cuid())
+  invoiceNumber String    @unique
+  amount        Float
+  currency      String    @default("RON")
+  status        String    @default("pending")
+  serialNumber  String?
+  locationId    String?
+  location      Location? @relation(fields: [locationId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Platform {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  serialNumbers String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Metrology {
+  id              String    @id @default(cuid())
+  serialNumber    String
+  certificateType String    @default("Initiala")
+  issueDate       DateTime?
+  expiryDate      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model MetrologyApproval {
+  id           String             @id @default(cuid())
+  name         String
+  dataEmitere  DateTime?
+  dataExpirare DateTime?
+  providerId   String?
+  provider     Provider?          @relation(fields: [providerId], references: [id])
+  cabinetId    String?
+  cabinet      Cabinet?           @relation(fields: [cabinetId], references: [id])
+  gameMixId    String?
+  gameMix      GameMix?           @relation(fields: [gameMixId], references: [id])
+  softwareId   String?
+  software     MetrologySoftware? @relation(fields: [softwareId], references: [id])
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}
+
+model MetrologyCommission {
+  id            String    @id @default(cuid())
+  name          String
+  dataEmitere   DateTime?
+  dataExpirare  DateTime?
+  serialNumbers String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model MetrologyAuthority {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MetrologySoftware {
+  id            String              @id @default(cuid())
+  name          String
+  version       String?
+  providerId    String?
+  provider      Provider?           @relation(fields: [providerId], references: [id])
+  cabinetId     String?
+  cabinet       Cabinet?            @relation(fields: [cabinetId], references: [id])
+  gameMixId     String?
+  gameMix       GameMix?            @relation(fields: [gameMixId], references: [id])
+  serialNumbers String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  approvals     MetrologyApproval[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  email     String?  @unique
+  role      String   @default("user")
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
