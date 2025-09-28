@@ -3,7 +3,7 @@ import { getGoogleSheetsData, convertSheetsDataToObjects, parseSlotMachineData, 
 import { apiRequest } from './auth.js';
 
 // API base URL - Connected to backend on Vercel
-const API_BASE_URL = 'https://cashpot-v7-backend.onrender.com/api';
+const API_BASE_URL = '/api';
 
 // Fallback to localStorage
 const getLocalStorageData = (endpoint) => {

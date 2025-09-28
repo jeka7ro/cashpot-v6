@@ -1,14 +1,15 @@
 {
-  "name": "cashpot-v6",
+  "name": "base44-app",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "server": "node index.js",
-    "start": "node index.js"
+    "server": "node server-simple.js",
+    "start": "concurrently \"npm run server\" \"npm run dev\""
   },
   "dependencies": {
     "@base44/sdk": "^0.1.2",
@@ -46,7 +47,7 @@
     "cors": "^2.8.5",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.5.2",
-    "express": "^4.18.2",
+    "express": "^5.1.0",
     "framer-motion": "^12.4.7",
     "googleapis": "^160.0.0",
     "input-otp": "^1.4.2",
@@ -68,6 +69,8 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "zod": "^3.24.2",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
     "mongoose": "^7.5.0",
     "dotenv": "^16.3.1",
     "bcryptjs": "^2.4.3",
