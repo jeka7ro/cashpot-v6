@@ -1,0 +1,58 @@
+name: Update Data
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/1 * * * *' # Every minute
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Update data.json
+        run: |
+          # Create a simple data structure
+          cat > data.json << 'EOF'
+          {
+            "companies": [
+              {
+                "id": "comp-1",
+                "name": "SMARTFLIX SRL",
+                "contact_person": "Eugeniu Cazmal",
+                "registration_number": "J44555332423",
+                "tax_number": "R035678901",
+                "email": "jeka7ro@gmail.com",
+                "phone": "0729030303",
+                "status": "active",
+                "created_date": "2024-09-26T00:00:00.000Z",
+                "updated_date": "2024-09-26T00:00:00.000Z"
+              }
+            ],
+            "locations": [],
+            "providers": [],
+            "cabinets": [],
+            "gameMixes": [],
+            "platforms": [],
+            "slotMachines": [],
+            "invoices": [],
+            "metrology": [],
+            "metrologyApprovals": [],
+            "metrologyCommissions": [],
+            "metrologyAuthorities": [],
+            "metrologySoftware": [],
+            "jackpots": [],
+            "users": []
+          }
+          EOF
+          
+          # Copy to public directory
+          cp data.json public/data.json
+          
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Update data.json" || exit 0
+          git push
